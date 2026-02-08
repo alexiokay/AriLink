@@ -6,13 +6,13 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "use": "nvm use",
-    "build": "tsc",
-    "watch": "tsc -w",
-    "start": "nvm use && npx ts-node -T core/manager.ts",
-    "dev": "nvm use && npm run watch"
+    "build": "node node_modules/typescript/bin/tsc",
+    "watch": "node node_modules/typescript/bin/tsc -w",
+    "start": "npx ts-node -T core/manager.ts",
+    "dev": "npm run watch"
   },
   "author": "Alexi Pawelec",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
     "@aws-sdk/client-transcribe-streaming": "^3.354.0",
     "@google-cloud/speech": "^7.0.1",

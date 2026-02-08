@@ -29,9 +29,16 @@
  * just the transcribed text, and resultsCallback whic provides the
  * full results structure. 
  */
-import chalk from 'chalk';
-import { Transform } from 'stream';
-import { SpeechClient } from '@google-cloud/speech';
+
+const { Transform } = require('stream');
+const { SpeechClient } = require('@google-cloud/speech');
+
+// Simple console color helpers (replacing chalk ESM dependency)
+const colors = {
+	green: (text) => `\x1b[32m${text}\x1b[0m`,
+	red: (text) => `\x1b[31m${text}\x1b[0m`,
+	yellow: (text) => `\x1b[33m${text}\x1b[0m`,
+};
 
 class GoogleSpeechProvider {
 	constructor(config, socket, transcriptCallback, resultsCallback) {
@@ -109,8 +116,10 @@ class GoogleSpeechProvider {
 		const correctedTime =
 			this.resultEndTime - this.bridgingOffset + this.streamingLimit * this.restartCounter;
 
-		process.stdout.clearLine();
-		process.stdout.cursorTo(0);
+		if (process.stdout.clearLine) {
+			process.stdout.clearLine();
+			process.stdout.cursorTo(0);
+		}
 
 		let stdoutText = '';
 		if (stream.results[0] && stream.results[0].alternatives[0]) {
@@ -119,14 +128,14 @@ class GoogleSpeechProvider {
 
 		if (stream.results[0].isFinal) {
 			this.isFinalEndTime = this.resultEndTime;
-			process.stdout.write(chalk.green(`${stdoutText}\n`));
+			process.stdout.write(colors.green(`${stdoutText}\n`));
 			this.lastTranscriptWasFinal = true;
 		} else {
 			// Make sure transcript does not exceed console character length
 			if (stdoutText.length > process.stdout.columns) {
 				stdoutText = stdoutText.substring(0, process.stdout.columns - 4) + '...';
 			}
-			process.stdout.write(chalk.red(`${stdoutText}`));
+			process.stdout.write(colors.red(`${stdoutText}`));
 			this.lastTranscriptWasFinal = false;
 		}
 		return stream.results;
@@ -188,7 +197,7 @@ class GoogleSpeechProvider {
 			process.stdout.write("\n");
 		}
 		process.stdout.write(
-				chalk.yellow(`${this.streamingLimit * this.restartCounter}: RESTARTING REQUEST\n`)
+				colors.yellow(`${this.streamingLimit * this.restartCounter}: RESTARTING REQUEST\n`)
 		);
 
 		this.newStream = true;
@@ -197,5 +206,4 @@ class GoogleSpeechProvider {
 	}
 }
 
-export { GoogleSpeechProvider }; 
-
+module.exports.GoogleSpeechProvider = GoogleSpeechProvider;

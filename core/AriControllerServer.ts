@@ -10,45 +10,56 @@ const moment = require("moment");
 const path = require("path");
 require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
+const {
+  CallSessionManager,
+  sessionManager,
+} = require("./CallSession");
+
+// Type definition for CallSessionData (inline since we can't import types with require)
+interface CallSessionData {
+  id: string;
+  bridge: any;
+  incomingChannel: any;
+  outgoingChannel?: any;
+  externalMediaChannelId?: string;
+  startTime: Date;
+  status: "pending" | "active" | "ended";
+  noMatchCount: number;
+}
+
 class AriControllerServer extends EventEmitter {
-  constructor(pbxIP, accessKey, secretKey) {
+  private pbxIP: string;
+  private accessKey: string;
+  private secretKey: string;
+  private client: any;
+  private udpServer: any;
+  private transcriptionServerIp: string;
+  private transcriptionServerPort: string;
+  private ws: any;
+  private contacts: any;
+  private sessionManager: CallSessionManager;
+
+  // Map to store per-session WebSocket message handlers
+  private sessionMessageHandlers: Map<string, (message: any) => void> =
+    new Map();
+
+  constructor(pbxIP: string, accessKey: string, secretKey: string) {
     super();
     this.pbxIP = pbxIP;
     this.accessKey = accessKey;
     this.secretKey = secretKey;
     this.client = null;
-    this.bridge = null;
-    this.bridge2 = null;
 
     this.udpServer = null;
     this.transcriptionServerIp = "0.0.0.0";
     this.transcriptionServerPort = "3044";
-    this.activeChannels = new Map();
-    this.bridges = null;
-    this.externalMediaChannelId = null;
-    this.isOutgoingCall = false;
-    this.ws = null;
-  }
 
-  closeAllChannels() {
-    this.client.channels.list((err, channels) => {
-      if (err) {
-        console.error("Error listing channels:", err);
-        return;
-      }
-
-      channels.forEach((channel) => {
-        //console.log("Channel: ", channel);
-        try {
-          channel.hangup();
-        } catch (err) {}
-      });
-    });
+    // Use the session manager for multi-call support
+    this.sessionManager = sessionManager;
   }
 
   async start(contacts: any[]) {
     await this.connectARI();
-    await this.createBridge();
     this.startARILoop();
     this.startWebServer();
     this.contacts = contacts;
@@ -60,15 +71,15 @@ class AriControllerServer extends EventEmitter {
     }
   }
 
-  async connectARI() {
+  async connectARI(): Promise<void> {
     return new Promise((resolve, reject) => {
-      const ariEndpoint = `http://${this.pbxIP}:8088`; //:8088 
+      const ariEndpoint = `http://${this.pbxIP}:8088`;
 
       ari.connect(
         ariEndpoint,
         process.env.ASTERISK_LOGIN,
         process.env.ASTERISK_PASSWORD,
-        (err, client) => {
+        (err: any, client: any) => {
           if (err) {
             reject(err);
           } else {
@@ -80,26 +91,24 @@ class AriControllerServer extends EventEmitter {
     });
   }
 
-  async createBridge() {
+  /**
+   * Create a new bridge for a specific call session
+   */
+  async createBridgeForSession(sessionId: string): Promise<any> {
     try {
-      this.bridges = await this.client.bridges.list();
-      this.bridge = this.bridges.find(
-        (candidate) => candidate.bridge_type === "mixing"
+      const bridge = await this.client.bridges.create({ type: "mixing" });
+      console.log(
+        `[Session ${sessionId}] Created dedicated bridge ${bridge.id}`
       );
 
-      if (this.bridge) {
-        console.log(`Using bridge ${this.bridge.id}`);
-      } else {
-        this.bridge = await this.client.bridges.create({ type: "mixing" });
-        console.log(`Created bridge ${this.bridge.id}`);
-      }
-
-      this.bridge.on("BridgeDestroyed", (event) => {
+      bridge.on("BridgeDestroyed", (event: any) => {
+        console.log(`[Session ${sessionId}] Bridge ${bridge.id} destroyed`);
         this.emit("bridgeDestroyed", event);
       });
 
-      return;
+      return bridge;
     } catch (err) {
+      console.error(`[Session ${sessionId}] Error creating bridge:`, err);
       throw err;
     }
   }
@@ -119,7 +128,7 @@ class AriControllerServer extends EventEmitter {
     });
 
     app.use(express.static(__dirname + "/public"));
-    app.get("/", (req, res) => {
+    app.get("/", (req: any, res: any) => {
       res.sendFile(__dirname + "/testPage.html");
     });
 
@@ -133,8 +142,31 @@ class AriControllerServer extends EventEmitter {
       console.log("WebSocket connection to AriTranscriber server established");
     };
 
-    this.ws.onmessage = (message) => {
+    // Central message router - routes transcriptions to the correct session handler
+    this.ws.onmessage = (message: any) => {
       console.log("Received transcription:", message.data);
+
+      // Try to parse message with session ID, or broadcast to all handlers
+      let parsedMessage: any;
+      try {
+        parsedMessage = JSON.parse(message.data);
+      } catch {
+        // Plain text message - route to all active handlers
+        parsedMessage = { text: message.data };
+      }
+
+      // If message has sessionId, route to specific handler
+      if (parsedMessage.sessionId) {
+        const handler = this.sessionMessageHandlers.get(parsedMessage.sessionId);
+        if (handler) {
+          handler(parsedMessage);
+        }
+      } else {
+        // Broadcast to all handlers (fallback for non-tagged messages)
+        for (const handler of this.sessionMessageHandlers.values()) {
+          handler({ text: message.data });
+        }
+      }
     };
 
     this.ws.onclose = () => {
@@ -142,121 +174,168 @@ class AriControllerServer extends EventEmitter {
     };
   }
 
-  async stasisStart(event, channel) {
+  async stasisStart(event: any, channel: any) {
     const dialed = event.args[0] === "dialed";
-
-    console.log("dialed: ", dialed);
-
-    //! ----------------- test -----------------
-    //const channeldial = event["channel"]["dialed"]["name"];
-    const channename = event["channel"]["name"];
-    //console.log("test variable: ", channeldial);
-    console.log("test variable: ", channename);
-    //! ----------------- test -----------------
+    const channelName = event["channel"]["name"];
 
     console.log(
       util.format(
-        "Channel %s just entered our application, adding it to bridge %s",
+        "Channel %s just entered our application",
         channel.name
-        //this.bridge.id
       )
     );
 
     await channel.answer();
 
     if (dialed) {
-      // if the channel is outgoing, play a welcome message after is answered
-      console.log(
-        dialed ? "this channel is dialed" : "this channel is incoming"
+      // Outgoing channel (dialed party) - find its session and add to bridge
+      console.log("This channel is dialed (outgoing)");
+
+      // Find the session that initiated this outgoing call
+      // The session ID is passed in the channel variables or we match by context
+      const session = this.findSessionForOutgoingChannel(channel);
+      if (session) {
+        this.sessionManager.setOutgoingChannel(session.id, channel);
+        this.addChannelToBridge(channel, session.bridge);
+      } else {
+        console.warn("Could not find session for outgoing channel");
+      }
+    } else if (channelName.startsWith("UnicastRTP")) {
+      // External media channel - find its session
+      console.log("This is an external media channel");
+      const session = this.sessionManager.getSessionByExternalMediaId(
+        channel.id
       );
-
-      this.addChannelToBridge(channel);
-    } else if (channel.id == this.externalMediaChannelId) {
-      this.addChannelToBridge(channel);
-      console.log("this is the external media channel");
-    } else if (channel.name.startsWith("UnicastRTP")) {
-      this.addChannelToBridge(channel);
-      console.log("this is the external media channel");
+      if (session) {
+        this.addChannelToBridge(channel, session.bridge);
+      }
     } else {
-      console.log("bridge type:" + this.bridge.bridge_type);
-      this.addChannelToBridge(channel);
-      this.externalMediaChannelId = await this.createExternalMediaChannel();
-
-      // console.log("from channel: ", channel.name);
-
-      //if the channel is incoming, play a welcome message and initiate the outgoing call
-      const audio_url = "custom/welcome";
-      channel.play({ media: `sound:${audio_url}` }, (err, playback) => {
-        console.log(util.format("Playing audio: ", audio_url));
-        if (err) {
-          console.error("Error playing audio:", err);
-          return;
-        }
-
-        playback.once("PlaybackFinished", (completedPlayback) => {
-          let noMatchCount = 0;
-          console.log("Audio playback finished");
-          this.playAudio(channel, "beep");
-          setTimeout(() => {}, 6000);
-
-          this.ws.onmessage = (message) => {
-            console.log("script received transcription:", message.data);
-
-            let foundNumber = this.findNumberByWords(message.data);
-            console.log("found number: ", foundNumber);
-            if (foundNumber === "no-match") {
-              noMatchCount++;
-              this.playAudio(channel, "beep");
-
-              if (
-                noMatchCount === 3 ||
-                noMatchCount === 6 ||
-                noMatchCount === 9
-              ) {
-                this.playAudio(channel, "custom/try_again");
-              } else if (noMatchCount === 12) {
-                console.log("no match 3 times, hangup the call");
-                // hangup the call
-                channel.hangup();
-              }
-            } else {
-              console.log("found number: ", foundNumber);
-              this.initiateOutgoingCall(channel, foundNumber);
-              // breeak the ws.onmessage loop
-              this.ws.onmessage = () => {};
-            }
-          };
-        });
-      });
+      // New incoming call - create a new session
+      console.log("New incoming call - creating session");
+      await this.handleIncomingCall(channel);
     }
   }
 
-  async initiateOutgoingCall(dialingChannel, recipent) {
-    const fromNumber = process.env.FROM_NUMBER; // Twilio / Hallo
-    const fromNumber2 = process.env.FROM_NUMBER2; // Voip.ms
-    const exampleCallToNumber1 = process.env.EXAMPLE_CALL_TO_NUMBER1;
-    const exampleCallToNumber2 = process.env.EXAMPLE_CALL_TO_NUMBER2;
-    const testPhone = process.env.TEST_PHONE; // Voip.ms Bria +48
-    const testPhone2 = process.env.TEST_PHONE2; // Twilio +31
+  /**
+   * Handle a new incoming call by creating an isolated session
+   */
+  async handleIncomingCall(channel: any) {
+    // Generate unique session ID
+    const sessionId = this.sessionManager.generateSessionId();
+
+    // Create dedicated bridge for this call
+    const bridge = await this.createBridgeForSession(sessionId);
+
+    // Create the session
+    const session = this.sessionManager.createSession(
+      sessionId,
+      bridge,
+      channel
+    );
+
+    console.log(`[Session ${sessionId}] New incoming call from ${channel.name}`);
+
+    // Add incoming channel to its dedicated bridge
+    this.addChannelToBridge(channel, bridge);
+
+    // Create external media channel for transcription
+    await this.createExternalMediaChannelForSession(sessionId);
+
+    // Set up session-specific transcription handler
+    this.setupSessionTranscriptionHandler(session, channel);
+
+    // Play welcome message
+    const audioUrl = "custom/welcome";
+    channel.play({ media: `sound:${audioUrl}` }, (err: any, playback: any) => {
+      console.log(util.format("[Session %s] Playing audio: %s", sessionId, audioUrl));
+      if (err) {
+        console.error("Error playing audio:", err);
+        return;
+      }
+
+      playback.once("PlaybackFinished", (completedPlayback: any) => {
+        console.log(`[Session ${sessionId}] Audio playback finished`);
+        this.playAudio(channel, "beep");
+      });
+    });
+  }
+
+  /**
+   * Set up transcription handler for a specific session
+   */
+  setupSessionTranscriptionHandler(session: CallSessionData, channel: any) {
+    const sessionId = session.id;
+
+    const handler = (message: any) => {
+      const text = message.text || message.data || message;
+      console.log(`[Session ${sessionId}] Received transcription: ${text}`);
+
+      const foundNumber = this.findNumberByWords(text);
+      console.log(`[Session ${sessionId}] Found number: ${foundNumber}`);
+
+      if (foundNumber === "no-match") {
+        const noMatchCount = this.sessionManager.incrementNoMatchCount(sessionId);
+        this.playAudio(channel, "beep");
+
+        if (noMatchCount === 3 || noMatchCount === 6 || noMatchCount === 9) {
+          this.playAudio(channel, "custom/try_again");
+        } else if (noMatchCount >= 12) {
+          console.log(`[Session ${sessionId}] No match 12 times, hanging up`);
+          channel.hangup();
+          this.sessionMessageHandlers.delete(sessionId);
+        }
+      } else {
+        console.log(`[Session ${sessionId}] Initiating call to ${foundNumber}`);
+        this.initiateOutgoingCall(session, channel, foundNumber);
+        // Remove handler after successful match
+        this.sessionMessageHandlers.delete(sessionId);
+      }
+    };
+
+    this.sessionMessageHandlers.set(sessionId, handler);
+  }
+
+  /**
+   * Find session for an outgoing channel (matched by bridge membership or metadata)
+   */
+  findSessionForOutgoingChannel(channel: any): CallSessionData | undefined {
+    // For now, find the most recent pending session
+    // In production, you'd want to pass session ID via channel variables
+    for (const session of Array.from(
+      this.sessionManager.getActiveSessionIds()
+    )) {
+      const sessionData = this.sessionManager.getSession(session);
+      if (sessionData && sessionData.status === "pending") {
+        return sessionData;
+      }
+    }
+    return undefined;
+  }
+
+  async initiateOutgoingCall(
+    session: CallSessionData,
+    dialingChannel: any,
+    recipient: string
+  ) {
+    const fromNumber = process.env.FROM_NUMBER || "unknown";
     const sipProvider = process.env.SIP_PROVIDER;
 
     const outgoingChannelParams = {
-      endpoint: `Local/${recipent}@from-internal`,
+      endpoint: `Local/${recipient}@from-internal`,
       app: "hello-world",
-
       callerId: fromNumber,
       appArgs: "dialed",
       headers: {
         "X-Custom-Caller-ID": fromNumber,
-        "X-Custom-Recipient": recipent,
-        // Add more headers if needed
+        "X-Custom-Recipient": recipient,
+        "X-Session-ID": session.id,
       },
     };
 
-    let ringingPlayback;
+    let ringingPlayback: any;
     dialingChannel.play(
       { media: "tone:ring;tonezone=fr" },
-      (err, newPlayback) => {
+      (err: any, newPlayback: any) => {
         if (err) {
           throw err;
         }
@@ -266,46 +345,54 @@ class AriControllerServer extends EventEmitter {
 
     await this.client.channels.originate(
       outgoingChannelParams,
-      (err, channel) => {
-        // save the channel id so we can control it later on StasisStart
+      (err: any, channel: any) => {
         if (err) {
-          console.error("Error initiating outgoing call:", err);
+          console.error(
+            `[Session ${session.id}] Error initiating outgoing call:`,
+            err
+          );
           return;
         }
 
-        channel.on("StasisStart", (event, channel) => {
-          channel.play({ media: "sound:custom/welcome_2" }, (err, playback) => {
-            if (err) {
-              console.error("Error playing ringing tone:", err);
-              return;
-            }
+        console.log(`[Session ${session.id}] Outgoing call initiated`);
 
-            playback.once("PlaybackFinished", (completedPlayback) => {
-              console.log("Ringing tone playback finished");
-              ringingPlayback.stop();
-              setTimeout(() => {}, 2000);
-              this.playAudio(channel, "beep");
-            });
-          });
+        channel.on("StasisStart", (event: any, outChannel: any) => {
+          // Update session with outgoing channel
+          this.sessionManager.setOutgoingChannel(session.id, outChannel);
+
+          outChannel.play(
+            { media: "sound:custom/welcome_2" },
+            (err: any, playback: any) => {
+              if (err) {
+                console.error("Error playing ringing tone:", err);
+                return;
+              }
+
+              playback.once("PlaybackFinished", (completedPlayback: any) => {
+                console.log(
+                  `[Session ${session.id}] Ringing tone playback finished`
+                );
+                if (ringingPlayback) {
+                  ringingPlayback.stop();
+                }
+                this.playAudio(outChannel, "beep");
+              });
+            }
+          );
         });
 
-        // Store the call start time
+        // Store call timing for usage registration
         const callStartTime = moment().format("YYYY-MM-DD HH:mm:ss");
-        //this.addChannelToBridge(channel);
-        console.log("Outgoing call initiated successfully");
 
-        // Register the call usage after the call ends
-        channel.on("StasisEnd", (event, channel) => {
+        channel.on("StasisEnd", (event: any, endedChannel: any) => {
           const callEndTime = moment()
             .add(1, "hour")
             .format("YYYY-MM-DD HH:mm:ss");
-
           const date = new Date().toISOString().split("T")[0];
 
-          // Register outgoing call usage
           this.registerOutgoingCallUsage(
             fromNumber,
-            recipent,
+            recipient,
             callStartTime,
             callEndTime,
             date
@@ -315,22 +402,34 @@ class AriControllerServer extends EventEmitter {
     );
   }
 
-  stasisEnd(event, channel) {
+  stasisEnd(event: any, channel: any) {
     const channelId = channel.id;
     console.log(`Channel ${channelId} just left the Stasis application`);
 
-    this.activeChannels.delete(channelId);
+    // Find the session this channel belongs to
+    const session = this.sessionManager.getSessionByChannelId(channelId);
 
-    // close all channels
-    this.closeAllChannels();
+    if (session) {
+      console.log(
+        `[Session ${session.id}] Channel ${channel.name} ended`
+      );
+
+      // Clean up the session's message handler
+      this.sessionMessageHandlers.delete(session.id);
+
+      // End only this session, not all calls
+      this.sessionManager.endSession(session.id);
+    } else {
+      console.log(`Channel ${channelId} was not associated with any session`);
+    }
   }
 
-  dtmfReceived(event, channel) {
+  dtmfReceived(event: any, channel: any) {
     console.log(`Channel ${channel.name} clicked: ${event.digit}`);
   }
 
-  async createExternalMediaChannel() {
-    const ariEndpoint = `http://${this.pbxIP}:8088/ari`; // :8088/ari 
+  async createExternalMediaChannelForSession(sessionId: string): Promise<void> {
+    const ariEndpoint = `http://${this.pbxIP}:8088/ari`;
     const appName = "hello-world";
     const externalHost = process.env.EXTERNAL_HOST;
     const format = "ulaw";
@@ -338,7 +437,7 @@ class AriControllerServer extends EventEmitter {
     const password = process.env.ASTERISK_PASSWORD;
     const port = 8000;
 
-    const url = `${ariEndpoint}/channels/externalMedia?app=${appName}&external_host=${externalHost}%3A${8000}&format=${format}`;
+    const url = `${ariEndpoint}/channels/externalMedia?app=${appName}&external_host=${externalHost}%3A${port}&format=${format}`;
 
     try {
       const response = await fetch(url, {
@@ -352,16 +451,23 @@ class AriControllerServer extends EventEmitter {
       });
 
       const data = await response.json();
-      return;
 
-      console.log("ExternalMedia channel created:", data);
-    } catch (error) {
-      console.error("Error creating ExternalMedia channel:", error.message);
+      if (data && data.id) {
+        this.sessionManager.setExternalMediaChannelId(sessionId, data.id);
+        console.log(
+          `[Session ${sessionId}] External media channel created: ${data.id}`
+        );
+      }
+    } catch (error: any) {
+      console.error(
+        `[Session ${sessionId}] Error creating ExternalMedia channel:`,
+        error.message
+      );
     }
   }
 
-  playAudio(channel, audioUrl) {
-    channel.play({ media: `sound:${audioUrl}` }, (err, playback) => {
+  playAudio(channel: any, audioUrl: string) {
+    channel.play({ media: `sound:${audioUrl}` }, (err: any, playback: any) => {
       console.log("Playing audio:", audioUrl);
       if (err) {
         console.error("Error playing audio:", err);
@@ -372,8 +478,8 @@ class AriControllerServer extends EventEmitter {
     });
   }
 
-  addChannelToBridge(channel, bridge = this.bridge) {
-    bridge.addChannel({ channel: channel.id }, (err) => {
+  addChannelToBridge(channel: any, bridge: any) {
+    bridge.addChannel({ channel: channel.id }, (err: any) => {
       if (err) {
         console.error("Error adding channel to bridge:", err);
         return;
@@ -381,54 +487,41 @@ class AriControllerServer extends EventEmitter {
         console.log("Channel added to bridge successfully: " + channel.name);
         this.emit("channelAddedToBridge", channel);
       }
-      console.log("User: " + channel.name);
     });
   }
 
   /**
    * Finds a phone number based on matching words in a given text.
-   * @param {string} searchWords - The text to search for matching words.
-   * @returns {string} - The matched phone number, or "no-match" if no match is found.
    */
-  findNumberByWords(searchWords) {
+  findNumberByWords(searchWords: string): string {
     let foundNumber = "no-match";
 
-    // Split the search words into an array and remove empty strings
     const searchWordList = searchWords
       .toLowerCase()
       .split(" ")
-      .filter((word) => word !== "");
-    // delete dot from the last word
-    const cleanedSearchWordList = searchWordList.map((word) =>
-      word.replaceAll(".", "")
+      .filter((word: string) => word !== "");
+    const cleanedSearchWordList = searchWordList.map((word: string) =>
+      word.split(".").join("")
     );
 
-    // Iterate over each contact to find a match
     for (const contact of this.contacts.contacts) {
       const { name, phone, words } = contact;
-      console.log("name: ", name);
-      console.log("phone: ", phone);
-      console.log("words: ", words);
-      console.log("searchWordList: ", cleanedSearchWordList);
-      console.log("test: ");
 
-      // Check if any word in the contact's words matches any word in the search word list
-      const matchFound = words.some((contactWord) => {
-        // Find the matched word in the search word list
-        const matchedWord = cleanedSearchWordList.find((word) =>
+      const matchFound = words.some((contactWord: string) => {
+        const matchedWord = cleanedSearchWordList.find((word: string) =>
           contactWord.toLowerCase().includes(word)
         );
 
         if (matchedWord) {
           console.log(`Matched word: ${matchedWord}`);
-          return true; // Exit the loop once a match is found
+          return true;
         }
         return false;
       });
 
       if (matchFound) {
         foundNumber = phone;
-        break; // Exit the loop once a match is found
+        break;
       }
     }
 
@@ -436,16 +529,16 @@ class AriControllerServer extends EventEmitter {
   }
 
   async registerOutgoingCallUsage(
-    fromNumber,
-    recipent,
-    callStartTime,
-    callEndTime,
-    date
+    fromNumber: string,
+    recipient: string,
+    callStartTime: string,
+    callEndTime: string,
+    date: string
   ) {
-    console.log("callStartTime: ", callStartTime);
-    console.log("callEndTime: ", callEndTime);
-    console.log("phoneNumber: ", fromNumber);
-    console.log("recipent: ", recipent);
+    console.log("callStartTime:", callStartTime);
+    console.log("callEndTime:", callEndTime);
+    console.log("phoneNumber:", fromNumber);
+    console.log("recipient:", recipient);
 
     fetch("http://127.0.0.1:8001/api/v1/call-usage/", {
       method: "POST",
@@ -456,7 +549,7 @@ class AriControllerServer extends EventEmitter {
         start_time: callStartTime,
         end_time: callEndTime,
         from_number: fromNumber,
-        recipent: recipent,
+        recipent: recipient,
         date: date,
       }),
     })
@@ -470,18 +563,16 @@ class AriControllerServer extends EventEmitter {
   }
 
   async close() {
-    this.activeChannels.clear();
-    //this.closeAllChannels();
+    console.log("Closing AriControllerServer...");
+
+    // End all active sessions gracefully
+    await this.sessionManager.endAllSessions();
+
+    // Clear message handlers
+    this.sessionMessageHandlers.clear();
+
     this.emit("close");
   }
 }
-
-// Usage:
-// const pbxIP = IP;
-// const accessKey = "ACCESS KEY HERE";
-// const secretKey = "SECRET KEY HERE";
-
-// const speechServer = new AriControllerServer(pbxIP, accessKey, secretKey);
-// speechServer.start();
 
 module.exports.AriControllerServer = AriControllerServer;

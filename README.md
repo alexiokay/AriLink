@@ -3,7 +3,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8.3-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-23.x-green.svg)](https://nodejs.org/)
 [![Asterisk](https://img.shields.io/badge/Asterisk-ARI-red.svg)](https://wiki.asterisk.org/wiki/display/AST/Asterisk+REST+Interface+(ARI))
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Non-Commercial](https://img.shields.io/badge/License-Non--Commercial-orange.svg)](LICENSE)
 
 <p align="center">
   <!-- Replace with your own logo when available -->
@@ -29,7 +29,21 @@ TranscriptARI is a sophisticated telephony management system built on Asterisk's
 
 ## 🏗️ Architecture
 
-The system is built on TypeScript and Node.js with a modular architecture:
+The system is built on TypeScript and Node.js with a modular architecture supporting **multiple concurrent calls**:
+
+```mermaid
+flowchart TD
+    A[📞 Incoming Call 1] --> B[CallSessionManager]
+    C[📞 Incoming Call 2] --> B
+    B --> D[Session 1: Bridge 1]
+    B --> E[Session 2: Bridge 2]
+    D --> F[External Media 1]
+    E --> G[External Media 2]
+    F --> H[🎙️ Transcriber]
+    G --> H
+    H -->|routed by session ID| D
+    H -->|routed by session ID| E
+```
 
 ### Core Components
 
@@ -150,15 +164,20 @@ The system uses environment variables for configuration, including:
 
 ## 📜 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under a **Non-Commercial License (MIT-Based)** - see the [LICENSE](LICENSE) file for details.
 
-The MIT License is a permissive license that allows anyone to:
-- Use the software for any purpose
-- Change the software to suit your needs
-- Share the software with anyone
-- Sell the software or build commercial software with it
+### Summary
 
-The only requirement is to include the original copyright notice and license in any copy of the software/source.
+- ✅ **Free for non-commercial use** - Use, modify, and distribute for personal and educational purposes
+- 💼 **Commercial use requires permission** - Contact for commercial licensing
+- 📧 **Get in touch**: Discord: `alexispace`
+
+**Key Points:**
+- The software is provided "as is" without warranty
+- Attribution is required in all copies
+- Commercial use requires explicit permission from the copyright holder
+
+For the full license text, please refer to the [LICENSE](LICENSE) file.
 
 ---
 

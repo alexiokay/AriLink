@@ -19,17 +19,28 @@ interface AriTranscriberOptions {
   speakerDiarization: boolean;
   listenServer: string;
   audioOutput?: string;
-  audioServer: any;
+}
+
+interface SpeechResults {
+  isFinal: boolean;
+  alternatives: Array<{
+    transcript: string;
+    words?: Array<{
+      word: string;
+      speakerTag: number;
+    }>;
+  }>;
 }
 
 class AriTranscriber extends EventEmitter {
   private opts: AriTranscriberOptions;
-  private webServer?: http.Server;
-  private wssServer?: WebSocket.Server;
-  private speechProvider?: GoogleSpeechProvider;
-  private audioServer?: any;
+  private webServer: any;
+  private wssServer: any;
+  private speechProvider: any;
+  private audioServer: any;
 
   constructor(opts: AriTranscriberOptions) {
+    super();
     this.opts = opts;
     // Run it.
     this.transcriber();
@@ -45,10 +56,10 @@ class AriTranscriber extends EventEmitter {
       : http.createServer();
 
     this.wssServer = new WebSocket.Server({ server: this.webServer });
-    this.wssServer.on("connection", (ws, req) => {
+    this.wssServer.on("connection", (ws: any, req: any) => {
       console.log("Connection from: ", req.connection.remoteAddress);
 
-      ws.on("message", (message) => {
+      ws.on("message", (message: any) => {
         console.log("Received WebSocket message:", message); // Log the received WebSocket message
       });
 
@@ -74,7 +85,7 @@ class AriTranscriber extends EventEmitter {
   private transcriptCallback(text: string, isFinal: boolean): void {
     if (isFinal && this.wssServer) {
       console.log("Received transcription:", text);
-      this.wssServer.clients.forEach((client) => {
+      this.wssServer.clients.forEach((client: any) => {
         if (client.readyState === WebSocket.OPEN) {
           client.send(text);
         }
@@ -94,9 +105,11 @@ class AriTranscriber extends EventEmitter {
         .join("\n");
       console.log(`Transcription: ${transcription}`);
       const wordsInfo = results[0].alternatives[0].words;
-      wordsInfo.forEach((a) =>
-        console.log(` word: ${a.word}, speakerTag: ${a.speakerTag}`)
-      );
+      if (wordsInfo) {
+        wordsInfo.forEach((a) =>
+          console.log(` word: ${a.word}, speakerTag: ${a.speakerTag}`)
+        );
+      }
     }
   }
 
@@ -129,12 +142,12 @@ class AriTranscriber extends EventEmitter {
       this.opts.audioOutput || false
     );
 
-    this.audioServer.on("packet", (packet) => {
+    this.audioServer.on("packet", (packet: any) => {
       console.log("Received RTP packet:", packet); // Log the received RTP packet
     });
 
     console.log("Starting speech provider");
-    let config = {
+    let config: any = {
       encoding: speechEncoding,
       sampleRateHertz: speechRate,
       languageCode: this.opts.speechLang,
@@ -160,10 +173,10 @@ class AriTranscriber extends EventEmitter {
     this.speechProvider = new provider.GoogleSpeechProvider(
       config,
       this.audioServer,
-      (text, isFinal) => {
+      (text: string, isFinal: boolean) => {
         this.transcriptCallback(text, isFinal);
       },
-      (results) => {
+      (results: SpeechResults[]) => {
         if (this.opts.speakerDiarization) {
           this.resultsCallback(results);
         }
@@ -186,20 +199,5 @@ class AriTranscriber extends EventEmitter {
   }
 }
 
-// // Specify the options for the transcriber
-// const options: AriTranscriberOptions = {
-//   sslCert: "", //path/to/ssl/certificate.crt
-//   sslKey: "path/to/ssl/private/key.key",
-//   wssPort: 3044,
-//   format: "ulaw",
-//   speechLang: "en-US",
-//   speechModel: "default",
-//   speakerDiarization: false,
-//   listenServer: "0.0.0.0:8000",
-//   audioOutput: "audio.raw",
-// };
-
-// // Create an instance of AriTranscriber with the provided options
-// const transcriber = new AriTranscriber(options);
-
 module.exports.AriTranscriber = AriTranscriber;
+module.exports.AriTranscriberOptions = {};
