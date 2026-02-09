@@ -1,0 +1,14 @@
+{
+  "name": "DirectDialAssistant",
+  "language": "en-US",
+  "prompts": {
+    "welcome": "custom/welcome_2",
+    "tryAgain": "custom/try_again",
+    "goodbye": "custom/goodbye",
+    "error": "custom/error"
+  },
+  "behavior": {
+    "maxNoMatches": 12,
+    "tryAgainInterval": 3
+  }
+}

@@ -14,7 +14,8 @@
   },
   "include": [
     "core/**/*",
-    "tools/**/*"
+    "tools/**/*",
+    "assistants/**/*"
   ],
   "exclude": [
     "node_modules",

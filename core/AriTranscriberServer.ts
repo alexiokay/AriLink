@@ -1,6 +1,6 @@
-const WebSocket = require("ws");
-const rtp = require("./rtp-udp-server");
+import * as WebSocket from "ws";
 
+const rtp = require("./rtp-udp-server");
 const fs = require("fs");
 const https = require("https");
 const http = require("http");

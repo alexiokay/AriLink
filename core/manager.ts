@@ -5,7 +5,7 @@ const {
 
 const fs = require("fs");
 const path = require("path");
-require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
+require("dotenv").config({ path: path.resolve(__dirname, "../.env"), quiet: true });
 
 console.log("Hello, world!");
 
@@ -46,7 +46,7 @@ const { AriControllerServer } = require("./AriControllerServer");
 const options = {
   sslCert: "", //path/to/ssl/certificate.crt
   sslKey: "path/to/ssl/private/key.key",
-  wssPort: process.env.WSS_PORT,
+  wssPort: parseInt(process.env.WSS_PORT || "3044", 10),
   format: "slin16",
   speechLang: "en-US",
   speechModel: "default",
@@ -87,3 +87,4 @@ process.on("SIGINT", async () => {
 controller.start(contacts);
 
 //TODO: add methods to start and stop the transcriber and controller in case if one of them fails or is closed
+export {};

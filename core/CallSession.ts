@@ -10,6 +10,8 @@ interface CallSessionData {
   incomingChannel: any; // ARI Channel
   outgoingChannel?: any; // ARI Channel (dialed party)
   externalMediaChannelId?: string;
+  assistant?: any; // IAssistant instance for this session
+  callerName?: string; // Transcribed caller name
   startTime: Date;
   status: "pending" | "active" | "ended";
   noMatchCount: number;
@@ -133,6 +135,27 @@ class CallSessionManager extends EventEmitter {
   }
 
   /**
+   * Set assistant for a session
+   */
+  setAssistant(sessionId: string, assistant: any): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.assistant = assistant;
+      console.log(
+        `[SessionManager] Session ${sessionId} assistant set: ${assistant.config?.name || "unknown"}`
+      );
+    }
+  }
+
+  /**
+   * Get assistant for a session
+   */
+  getAssistant(sessionId: string): any | undefined {
+    const session = this.sessions.get(sessionId);
+    return session?.assistant;
+  }
+
+  /**
    * Increment no-match counter for a session
    */
   incrementNoMatchCount(sessionId: string): number {
@@ -156,6 +179,12 @@ class CallSessionManager extends EventEmitter {
 
     console.log(`[SessionManager] Ending session ${sessionId}`);
     session.status = "ended";
+
+    // Cleanup assistant
+    if (session.assistant) {
+      session.assistant.destroy();
+      session.assistant = null;
+    }
 
     // Hangup channels (if still active)
     try {
@@ -221,3 +250,4 @@ const sessionManager = new CallSessionManager();
 
 module.exports.CallSessionManager = CallSessionManager;
 module.exports.sessionManager = sessionManager;
+export {};

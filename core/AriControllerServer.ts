@@ -8,12 +8,13 @@ const WebSocket = require("ws");
 const moment = require("moment");
 
 const path = require("path");
-require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
+require("dotenv").config({ path: path.resolve(__dirname, "../.env"), quiet: true });
 
 const {
   CallSessionManager,
   sessionManager,
 } = require("./CallSession");
+const { AssistantFactory } = require("./AssistantFactory");
 
 // Type definition for CallSessionData (inline since we can't import types with require)
 interface CallSessionData {
@@ -22,6 +23,8 @@ interface CallSessionData {
   incomingChannel: any;
   outgoingChannel?: any;
   externalMediaChannelId?: string;
+  assistant?: any;
+  callerName?: string;
   startTime: Date;
   status: "pending" | "active" | "ended";
   noMatchCount: number;
@@ -37,7 +40,7 @@ class AriControllerServer extends EventEmitter {
   private transcriptionServerPort: string;
   private ws: any;
   private contacts: any;
-  private sessionManager: CallSessionManager;
+  private sessionManager: InstanceType<typeof CallSessionManager>;
 
   // Map to store per-session WebSocket message handlers
   private sessionMessageHandlers: Map<string, (message: any) => void> =
@@ -217,7 +220,7 @@ class AriControllerServer extends EventEmitter {
   }
 
   /**
-   * Handle a new incoming call by creating an isolated session
+   * Handle a new incoming call by creating an isolated session with an assistant
    */
   async handleIncomingCall(channel: any) {
     // Generate unique session ID
@@ -241,58 +244,163 @@ class AriControllerServer extends EventEmitter {
     // Create external media channel for transcription
     await this.createExternalMediaChannelForSession(sessionId);
 
-    // Set up session-specific transcription handler
-    this.setupSessionTranscriptionHandler(session, channel);
+    // Create assistant for this session
+    // Auto-select: use direct-dial if DEFAULT_ASSISTANT not set and 3CX not configured
+    let assistantType = process.env.DEFAULT_ASSISTANT;
+    if (!assistantType) {
+      const has3CX = process.env.RING_GROUP_3CX && process.env.TRUNK_3CX;
+      assistantType = has3CX ? "ivr-transfer" : "direct-dial";
+      console.log(`[Session ${sessionId}] Auto-selected assistant: ${assistantType} (3CX ${has3CX ? "configured" : "not configured"})`);
+    }
 
-    // Play welcome message
-    const audioUrl = "hello-world"; // Built-in Asterisk sound
-    channel.play({ media: `sound:${audioUrl}` }, (err: any, playback: any) => {
-      console.log(util.format("[Session %s] Playing audio: %s", sessionId, audioUrl));
-      if (err) {
-        console.error("Error playing audio:", err);
-        return;
-      }
+    const assistant = AssistantFactory.createByType(
+      assistantType,
+      this.client,
+      sessionId,
+      this.contacts
+    );
 
-      playback.once("PlaybackFinished", (completedPlayback: any) => {
-        console.log(`[Session ${sessionId}] Audio playback finished`);
-        this.playAudio(channel, "beep");
-      });
-    });
+    console.log(`[Session ${sessionId}] Using assistant: ${assistantType} (${assistant.config.name})`);
+
+    // Store assistant in session
+    this.sessionManager.setAssistant(sessionId, assistant);
+
+    // Listen for assistant events
+    this.setupAssistantEventHandlers(session, assistant, channel);
+
+    // Set up session-specific transcription handler (routes to assistant)
+    this.setupSessionTranscriptionHandler(session);
+
+    // Let the assistant handle call start (plays welcome, sets state)
+    const callerId = channel.caller?.number || "unknown";
+    const extension = channel.dialplan?.exten || "unknown";
+    await assistant.onCallStart(channel, callerId, extension);
   }
 
   /**
-   * Set up transcription handler for a specific session
+   * Set up transcription handler for a specific session.
+   * Routes transcriptions to the session's assistant.
    */
-  setupSessionTranscriptionHandler(session: CallSessionData, channel: any) {
+  setupSessionTranscriptionHandler(session: CallSessionData) {
     const sessionId = session.id;
 
     const handler = (message: any) => {
       const text = message.text || message.data || message;
+      const isFinal = message.is_final || message.isFinal || false;
       console.log(`[Session ${sessionId}] Received transcription: ${text}`);
 
-      const foundNumber = this.findNumberByWords(text);
-      console.log(`[Session ${sessionId}] Found number: ${foundNumber}`);
-
-      if (foundNumber === "no-match") {
-        const noMatchCount = this.sessionManager.incrementNoMatchCount(sessionId);
-        this.playAudio(channel, "beep");
-
-        if (noMatchCount === 3 || noMatchCount === 6 || noMatchCount === 9) {
-          this.playAudio(channel, "custom/try_again");
-        } else if (noMatchCount >= 12) {
-          console.log(`[Session ${sessionId}] No match 12 times, hanging up`);
-          channel.hangup();
-          this.sessionMessageHandlers.delete(sessionId);
-        }
-      } else {
-        console.log(`[Session ${sessionId}] Initiating call to ${foundNumber}`);
-        this.initiateOutgoingCall(session, channel, foundNumber);
-        // Remove handler after successful match
-        this.sessionMessageHandlers.delete(sessionId);
+      const assistant = this.sessionManager.getAssistant(sessionId);
+      if (assistant) {
+        assistant.onTranscription(text, isFinal);
       }
     };
 
     this.sessionMessageHandlers.set(sessionId, handler);
+  }
+
+  /**
+   * Set up event handlers for an assistant instance.
+   * Listens for transfer, contact match, and other assistant events.
+   */
+  setupAssistantEventHandlers(session: CallSessionData, assistant: any, channel: any) {
+    const sessionId = session.id;
+
+    // Handle transfer to 3CX Ring Group
+    assistant.on("transferTo3CX", async (data: { sessionId: string; callerName: string }) => {
+      console.log(`[Session ${sessionId}] Assistant requested 3CX transfer for "${data.callerName}"`);
+
+      const ringGroup = process.env.RING_GROUP_3CX;
+      const trunkName = process.env.TRUNK_3CX;
+
+      if (!ringGroup || !trunkName) {
+        console.error(`[Session ${sessionId}] 3CX not configured (RING_GROUP_3CX / TRUNK_3CX missing)`);
+        this.playAudio(channel, "beep");
+        return;
+      }
+
+      // Transfer to 3CX Ring Group
+      await this.transferTo3CX(session, channel, ringGroup, trunkName, data.callerName);
+    });
+
+    // Handle contact match (direct dialing)
+    assistant.on("contactMatched", async (data: { sessionId: string; name: string; number: string }) => {
+      console.log(`[Session ${sessionId}] Contact matched: ${data.name} → ${data.number}`);
+      // Contact matched, initiate outgoing call
+      this.initiateOutgoingCall(session, channel, data.number);
+      this.sessionMessageHandlers.delete(sessionId);
+    });
+
+    // Handle generic transfer request
+    assistant.on("transfer", async (data: { endpoint: string; sessionId: string }) => {
+      console.log(`[Session ${sessionId}] Transfer requested to: ${data.endpoint}`);
+      this.initiateOutgoingCall(session, channel, data.endpoint);
+      this.sessionMessageHandlers.delete(sessionId);
+    });
+  }
+
+  /**
+   * Transfer a call to a 3CX Ring Group via SIP trunk
+   */
+  async transferTo3CX(
+    session: CallSessionData,
+    channel: any,
+    ringGroup: string,
+    trunkName: string,
+    callerName: string
+  ): Promise<void> {
+    console.log(`[Session ${session.id}] Transferring to 3CX Ring Group ${ringGroup} via ${trunkName}`);
+
+    // Option 1: Use custom dialplan context
+    // const endpoint = `Local/${ringGroup}@to-3cx`;
+
+    // Option 2: Direct PJSIP endpoint
+    const endpoint = `PJSIP/${ringGroup}@${trunkName}`;
+
+    const fromNumber = channel.caller?.number || process.env.FROM_NUMBER || "unknown";
+
+    const outgoingChannelParams = {
+      endpoint: endpoint,
+      app: "hello-world",
+      callerId: fromNumber,
+      appArgs: "dialed",
+      headers: {
+        "X-Session-ID": session.id,
+        "X-Caller-Name": callerName,
+      },
+    };
+
+    try {
+      await this.client.channels.originate(
+        outgoingChannelParams,
+        (err: any, outgoingChannel: any) => {
+          if (err) {
+            console.error(`[Session ${session.id}] 3CX transfer failed:`, err);
+            this.playAudio(channel, "beep");
+            return;
+          }
+
+          console.log(`[Session ${session.id}] 3CX outgoing channel: ${outgoingChannel.id}`);
+
+          outgoingChannel.on("StasisStart", (event: any, outChannel: any) => {
+            this.sessionManager.setOutgoingChannel(session.id, outChannel);
+
+            // Bridge caller to 3CX Ring Group immediately
+            this.addChannelToBridge(outChannel, session.bridge);
+            console.log(`[Session ${session.id}] ✅ Bridged to 3CX Ring Group ${ringGroup}`);
+          });
+
+          const callStartTime = moment().format("YYYY-MM-DD HH:mm:ss");
+
+          outgoingChannel.on("StasisEnd", (event: any) => {
+            const callEndTime = moment().format("YYYY-MM-DD HH:mm:ss");
+            const date = new Date().toISOString().split("T")[0];
+            this.registerOutgoingCallUsage(fromNumber, ringGroup, callStartTime, callEndTime, date);
+          });
+        }
+      );
+    } catch (error) {
+      console.error(`[Session ${session.id}] Error during 3CX transfer:`, error);
+    }
   }
 
   /**
@@ -414,6 +522,12 @@ class AriControllerServer extends EventEmitter {
         `[Session ${session.id}] Channel ${channel.name} ended`
       );
 
+      // Notify assistant of call end
+      const assistant = this.sessionManager.getAssistant(session.id);
+      if (assistant) {
+        assistant.onCallEnd(channel);
+      }
+
       // Clean up the session's message handler
       this.sessionMessageHandlers.delete(session.id);
 
@@ -425,7 +539,17 @@ class AriControllerServer extends EventEmitter {
   }
 
   dtmfReceived(event: any, channel: any) {
-    console.log(`Channel ${channel.name} clicked: ${event.digit}`);
+    const digit = event.digit;
+    console.log(`Channel ${channel.name} DTMF: ${digit}`);
+
+    // Find session for this channel and route to assistant
+    const session = this.sessionManager.getSessionByChannelId(channel.id);
+    if (session) {
+      const assistant = this.sessionManager.getAssistant(session.id);
+      if (assistant) {
+        assistant.onDTMFInput(digit);
+      }
+    }
   }
 
   async createExternalMediaChannelForSession(sessionId: string): Promise<void> {
@@ -490,45 +614,6 @@ class AriControllerServer extends EventEmitter {
     });
   }
 
-  /**
-   * Finds a phone number based on matching words in a given text.
-   */
-  findNumberByWords(searchWords: string): string {
-    let foundNumber = "no-match";
-
-    const searchWordList = searchWords
-      .toLowerCase()
-      .split(" ")
-      .filter((word: string) => word !== "");
-    const cleanedSearchWordList = searchWordList.map((word: string) =>
-      word.split(".").join("")
-    );
-
-    for (const contact of this.contacts.contacts) {
-      const { name, phone, words } = contact;
-
-      const matchFound = words.some((contactWord: string) => {
-        // Use exact word matching, not substring matching
-        const matchedWord = cleanedSearchWordList.find((word: string) =>
-          word === contactWord.toLowerCase()
-        );
-
-        if (matchedWord) {
-          console.log(`Matched word: ${matchedWord}`);
-          return true;
-        }
-        return false;
-      });
-
-      if (matchFound) {
-        foundNumber = phone;
-        break;
-      }
-    }
-
-    return foundNumber;
-  }
-
   async registerOutgoingCallUsage(
     fromNumber: string,
     recipient: string,
@@ -577,3 +662,4 @@ class AriControllerServer extends EventEmitter {
 }
 
 module.exports.AriControllerServer = AriControllerServer;
+export {};

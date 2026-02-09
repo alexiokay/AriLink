@@ -1,7 +1,5 @@
-import * as WS from "ws";
+import WebSocket from "ws";
 import { EventEmitter } from "events";
-
-const WebSocket = WS.WebSocket || WS;
 
 interface TranscriptionConfig {
   encoding: string;

@@ -7,6 +7,10 @@ yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
 core/*.js
+!core/rtp-udp-server.js
+tools/*.js
+!tools/google-speech-provider.js
+assistants/**/*.js
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
@@ -15,6 +19,9 @@ pids
 *.pid
 *.seed
 *.pid.lock
+
+# Project status (local documentation)
+docs/PROJECT-STATUS.md
 
 *.raw
 *.wav
@@ -88,6 +95,9 @@ web_modules/
 .env.test.local
 .env.production.local
 .env.local
+
+# Claude Code project memory
+.claude/
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
