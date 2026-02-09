@@ -245,7 +245,7 @@ class AriControllerServer extends EventEmitter {
     this.setupSessionTranscriptionHandler(session, channel);
 
     // Play welcome message
-    const audioUrl = "custom/welcome";
+    const audioUrl = "hello-world"; // Built-in Asterisk sound
     channel.play({ media: `sound:${audioUrl}` }, (err: any, playback: any) => {
       console.log(util.format("[Session %s] Playing audio: %s", sessionId, audioUrl));
       if (err) {
@@ -432,7 +432,7 @@ class AriControllerServer extends EventEmitter {
     const ariEndpoint = `http://${this.pbxIP}:8088/ari`;
     const appName = "hello-world";
     const externalHost = process.env.EXTERNAL_HOST;
-    const format = "ulaw";
+    const format = "slin16"; // Raw PCM 8kHz - testing for better audio playback
     const username = process.env.ASTERISK_LOGIN;
     const password = process.env.ASTERISK_PASSWORD;
     const port = 8000;
@@ -508,8 +508,9 @@ class AriControllerServer extends EventEmitter {
       const { name, phone, words } = contact;
 
       const matchFound = words.some((contactWord: string) => {
+        // Use exact word matching, not substring matching
         const matchedWord = cleanedSearchWordList.find((word: string) =>
-          contactWord.toLowerCase().includes(word)
+          word === contactWord.toLowerCase()
         );
 
         if (matchedWord) {

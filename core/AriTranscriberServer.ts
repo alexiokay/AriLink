@@ -1,11 +1,12 @@
 const WebSocket = require("ws");
-const rtp = require("../rtp-udp-server");
+const rtp = require("./rtp-udp-server");
 
 const fs = require("fs");
 const https = require("https");
 const http = require("http");
 const { Transform } = require("stream");
-const provider = require("../tools/google-speech-provider");
+const googleProvider = require("../tools/google-speech-provider");
+const transcriptionProvider = require("../tools/transcription-provider");
 const EventEmitter = require("events");
 const net = require("net");
 
@@ -13,7 +14,7 @@ interface AriTranscriberOptions {
   sslCert?: string;
   sslKey?: string;
   wssPort: number;
-  format: "ulaw" | "slin16";
+  format: "ulaw" | "slin16" | "opus";
   speechLang: string;
   speechModel: string;
   speakerDiarization: boolean;
@@ -129,6 +130,10 @@ class AriTranscriber extends EventEmitter {
         speechRate = 16000;
         swap16 = true;
         break;
+      case "opus":
+        speechEncoding = "OPUS";
+        speechRate = 24000;
+        break;
       default:
         console.error(`Unknown format ${this.opts.format}`);
         return;
@@ -169,19 +174,65 @@ class AriTranscriber extends EventEmitter {
       config.diarizationSpeakerCount = 5;
     }
 
-    // Start the speech provider passing in the audio server socket.
-    this.speechProvider = new provider.GoogleSpeechProvider(
-      config,
-      this.audioServer,
-      (text: string, isFinal: boolean) => {
-        this.transcriptCallback(text, isFinal);
-      },
-      (results: SpeechResults[]) => {
-        if (this.opts.speakerDiarization) {
-          this.resultsCallback(results);
-        }
+    // Transcription services configuration
+    // TRANSCRIPTION_SERVICES = comma-separated list of services (tries in order)
+    // Example: ws://localhost:5000,ws://localhost:5001,google
+    // Keyword "google" = Google Cloud Speech (requires GOOGLE_APPLICATION_CREDENTIALS)
+
+    const servicesEnv = process.env.TRANSCRIPTION_SERVICES || "";
+    const services = servicesEnv.split(",").map(s => s.trim()).filter(s => s.length > 0);
+
+    if (services.length === 0) {
+      console.error("❌ ERROR: TRANSCRIPTION_SERVICES is not configured!");
+      throw new Error("Set TRANSCRIPTION_SERVICES (e.g., ws://localhost:5000 or ws://localhost:5000,google)");
+    }
+
+    console.log(`📋 Transcription services (in priority order):`);
+    services.forEach((service, index) => {
+      const label = index === 0 ? "PRIMARY" : `BACKUP ${index}`;
+      if (service.toLowerCase() === "google") {
+        console.log(`   ${label}: Google Cloud Speech ${index === 0 ? "⚠️ API costs apply" : "(fallback)"}`);
+      } else {
+        console.log(`   ${label}: ${service}`);
       }
-    );
+    });
+
+    // Validate Google credentials if "google" is in the list
+    if (services.some(s => s.toLowerCase() === "google") && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      console.error("❌ ERROR: 'google' in TRANSCRIPTION_SERVICES but no GOOGLE_APPLICATION_CREDENTIALS!");
+      throw new Error("Configure GOOGLE_APPLICATION_CREDENTIALS to use Google Cloud Speech");
+    }
+
+    // Try services in order
+    const primaryService = services[0];
+    const fallbackServices = services.slice(1);
+
+    if (primaryService.toLowerCase() === "google") {
+      console.log("☁️ Starting with Google Cloud Speech as primary");
+      this.speechProvider = new googleProvider.GoogleSpeechProvider(
+        config,
+        this.audioServer,
+        (text: string, isFinal: boolean) => {
+          this.transcriptCallback(text, isFinal);
+        },
+        (results: SpeechResults[]) => {
+          if (this.opts.speakerDiarization) {
+            this.resultsCallback(results);
+          }
+        }
+      );
+    } else {
+      console.log(`🎙️ Starting with local service: ${primaryService}`);
+      this.speechProvider = new transcriptionProvider.TranscriptionProvider(
+        config,
+        this.audioServer,
+        (text: string, isFinal: boolean) => {
+          this.transcriptCallback(text, isFinal);
+        },
+        primaryService,
+        fallbackServices
+      );
+    }
 
     console.log("speechProvider started");
 

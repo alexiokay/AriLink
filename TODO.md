@@ -1,0 +1,3 @@
+- recording
+- easy converting/uploading/previewing to asterisk server like custom lobby voice/responses.
+- app ( web based? )

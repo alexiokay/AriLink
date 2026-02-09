@@ -47,7 +47,7 @@ const options = {
   sslCert: "", //path/to/ssl/certificate.crt
   sslKey: "path/to/ssl/private/key.key",
   wssPort: process.env.WSS_PORT,
-  format: "ulaw",
+  format: "slin16",
   speechLang: "en-US",
   speechModel: "default",
   speakerDiarization: false,
@@ -60,8 +60,8 @@ const transcriber = new AriTranscriber(options);
 
 // Create an instance of AriControllerServer
 const pbxIP = process.env.PBX_IP;
-const accessKey = "ACCESS KEY HERE";
-const secretKey = "SECRET KEY HERE";
+const accessKey = process.env.ASTERISK_LOGIN || "";
+const secretKey = process.env.ASTERISK_PASSWORD || "";
 const controller = new AriControllerServer(pbxIP, accessKey, secretKey);
 
 // TODO: make it work

@@ -8,7 +8,9 @@
     "use": "nvm use",
     "build": "node node_modules/typescript/bin/tsc",
     "watch": "node node_modules/typescript/bin/tsc -w",
+    "clean": "node -e \"require('fs').readdirSync('core').filter(f=>f.endsWith('.js')).forEach(f=>require('fs').unlinkSync('core/'+f));require('fs').readdirSync('tools').filter(f=>f.endsWith('.js')&&f!=='google-speech-provider.js').forEach(f=>require('fs').unlinkSync('tools/'+f))\"",
     "start": "npx ts-node -T core/manager.ts",
+    "start:clean": "npm run clean && npm start",
     "dev": "npm run watch"
   },
   "author": "Alexi Pawelec",

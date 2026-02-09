@@ -1,0 +1,33 @@
+# Parakeet TDT Transcription Service Requirements
+# For NVIDIA Parakeet TDT 0.6B v3 with GPU acceleration
+
+# Core dependencies
+websockets>=12.0
+numpy>=1.24.0
+soundfile>=0.12.1
+
+# NVIDIA NeMo Toolkit (includes Parakeet models)
+nemo_toolkit[asr]>=2.0.0
+
+# PyTorch (required by NeMo, install CUDA version)
+# For CUDA 12.x (recommended):
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# Additional audio processing
+librosa>=0.10.0
+
+# For better performance
+numba>=0.57.0
+
+# Utilities
+tqdm>=4.65.0
+omegaconf>=2.3.0
+hydra-core>=1.3.0
+
+# Dependencies fixed during setup
+nv-one-logger-pytorch-lightning-integration
+lhotse
+einops
+transformers
+

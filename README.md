@@ -21,11 +21,12 @@ TranscriptARI is a sophisticated telephony management system built on Asterisk's
 ## ✨ Key Features
 
 - 🔄 **Call Management** - Handles incoming and outgoing calls through Asterisk PBX
-- 🎙️ **Speech-to-Text** - Real-time transcription of calls using Google Cloud Speech API  
+- 🎙️ **Speech-to-Text** - Real-time transcription using local AI models (Parakeet, Whisper) or Google Cloud
 - 🌉 **Bridge Management** - Creates and manages voice bridges for connecting multiple channels
 - 👥 **Contact Recognition** - Supports voice-activated dialing using a contacts database
 - 📡 **External Media Channels** - Supports external media integration for advanced use cases
 - 🔌 **WebSocket Interface** - Provides real-time updates and control via WebSockets
+- 🔁 **Automatic Fallback** - Seamlessly switches to backup transcription services if primary fails
 
 ## 🏗️ Architecture
 
@@ -65,10 +66,11 @@ The main controller that interfaces with Asterisk PBX:
 <p>
 
 Provides real-time speech transcription:
-- Connects to Google Cloud Speech API
+- Connects to configurable transcription services (local or cloud)
 - Processes RTP audio streams
 - Transmits transcription results via WebSockets
 - Supports customizable language and model settings
+- Automatic fallback to backup services on failure
 
 </p>
 </details>
@@ -85,13 +87,16 @@ Handles the real-time audio streaming:
 </details>
 
 <details>
-<summary><b>🗣️ Google Speech Provider</b></summary>
+<summary><b>🗣️ Transcription Providers</b></summary>
 <p>
 
-Integration with Google's Speech-to-Text API:
+Multiple transcription backend support:
+- **Local providers**: Parakeet TDT, Whisper (runs on your GPU)
+- **Cloud provider**: Google Speech-to-Text API (optional)
 - Handles streaming transcription with automatic restarts
 - Manages audio chunking for optimal performance
 - Provides both interim and final transcription results
+- Automatic failover between services
 
 </p>
 </details>
@@ -111,18 +116,64 @@ The system uses environment variables for configuration, including:
 
 <img src="https://cdn-icons-png.flaticon.com/512/4961/4961854.png" alt="Setup" width="50" align="right"/>
 
-1. Set up a FreePBX server - [FreePBX Server Installation and Configuration Guide](freepbx-setup.md)
-2. Configure environment variables in `.env` file (see `env.example` for reference)
-3. Set up Google Cloud credentials for speech recognition
-4. Configure contacts in `tools/contacts.json` for voice-activated dialing
-5. Start the system with:
+### Prerequisites
+
+1. **Set up FreePBX server** - [FreePBX Server Installation and Configuration Guide](freepbx-setup.md)
+2. **Install UV** (Python package manager):
+   ```powershell
+   # Windows PowerShell
+   irm https://astral.sh/uv/install.ps1 | iex
+   ```
+
+### Installation
+
+1. **Setup Transcription Service** (local speech recognition):
+
+   **Parakeet (Recommended - fastest):**
+   ```bash
+   cd transcription-services/parakeet-service
+   uv venv
+   uv pip install -r requirements.txt
+   ```
+
+   **OR Whisper (alternative):**
+   ```bash
+   cd transcription-services/whisper-service
+   uv venv
+   uv pip install -r requirements.txt
+   ```
+
+2. **Configure environment variables** in `.env` file:
+   ```env
+   TRANSCRIPTION_SERVICES=ws://localhost:5000
+   ```
+   See [`.env.example`](.env.example) for all options and fallback configuration.
+
+3. **Configure contacts** in `tools/contacts.json` for voice-activated dialing
+
+### Running the System
+
+1. **Start Transcription Service** (in terminal 1):
+
+   For Parakeet:
+   ```bash
+   cd transcription-services/parakeet-service
+   start-service.bat
+   ```
+
+   OR for Whisper:
+   ```bash
+   cd transcription-services/whisper-service
+   start-service.bat
+   ```
+   First run will download the model (~800MB for Whisper, ~600MB for Parakeet)
+
+2. **Start ARI Stasi Server** (in terminal 2):
    ```bash
    npm start
    ```
-   or
-   ```bash
-   npx ts-node -T core/manager.ts
-   ```
+
+See [Transcription Services Guide](docs/TRANSCRIPTION-SERVICES.md) for all configuration options including fallbacks.
 
 ## 💡 Use Cases
 
@@ -149,7 +200,9 @@ The system uses environment variables for configuration, including:
 
 - **Asterisk PBX** with ARI enabled
 - **Node.js** and TypeScript
-- **Google Cloud Speech API** credentials
+- **Transcription Service** - choose one:
+  - Local: Parakeet TDT 0.6B (RECOMMENDED) or Whisper
+  - Cloud: Google Cloud Speech API credentials (optional)
 - Various NPM packages including:
   ```
   ari-client, @google-cloud/speech, ws, express, dotenv
@@ -157,10 +210,12 @@ The system uses environment variables for configuration, including:
 
 ## 🔮 Future Improvements
 
-- 🔧 Enhanced typing for typescript
-- 🖥️ WEB UI for for monitoring and management
-- 🔊 Additional speech recognition providers like self hosted whisper model or Scribe from ElevenLabs
+- 🔧 Enhanced typing for TypeScript
+- 🖥️ Web UI for monitoring and management
+- ✅ ~~Additional speech recognition providers~~ **DONE: Local Whisper model integrated!**
+- 🔊 Additional providers: Scribe from ElevenLabs, Azure Speech
 - 📊 Call analytics and reporting features
+- 💾 Database persistence for call records and transcriptions
 
 ## 📜 License
 
