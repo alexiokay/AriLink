@@ -3,6 +3,7 @@ const {
   AriTranscriberOptions,
 } = require("./AriTranscriberServer");
 
+const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 require("dotenv").config({ path: path.resolve(__dirname, "../.env"), quiet: true });
@@ -71,49 +72,161 @@ console.log("Contacts:", contacts);
 const { AriControllerServer } = require("./AriControllerServer");
 const { AutoDialer } = require("./AutoDialer");
 
-// Specify the options for the transcriber
-const options = {
-  sslCert: "", //path/to/ssl/certificate.crt
-  sslKey: "path/to/ssl/private/key.key",
-  wssPort: parseInt(process.env.WSS_PORT || "3044", 10),
-  format: "slin16",
-  speechLang: "en-US",
-  speechModel: "default",
-  speakerDiarization: false,
-  listenServer: process.env.LISTENER_SERVER,
-  audioOutput: "audio.raw",
-};
-
-// Create an instance of AriTranscriber with the provided options
-const transcriber = new AriTranscriber(options);
-
 // Create an instance of AriControllerServer
 const pbxIP = process.env.PBX_IP;
 const accessKey = process.env.ASTERISK_LOGIN || "";
 const secretKey = process.env.ASTERISK_PASSWORD || "";
-const controller = new AriControllerServer(pbxIP, accessKey, secretKey);
+const useRustRtp = process.env.USE_RUST_RTP === "true";
+const rustServerUrl = process.env.RUST_SERVER_URL || "http://localhost:9900";
 
-// TODO: make it work
+let transcriber: any = null;
+let rustProcess: any = null;
 
-controller.on("close", () => {
-  console.log("controller closed");
-  //transcriber.stop();
-});
+/**
+ * Start the Rust RTP server as a child process.
+ * Resolves when the server is ready (health check passes).
+ */
+function startRustServer(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    // Find the binary: bin/ (deployed) > release build > debug build
+    const isWin = process.platform === "win32";
+    const ext = isWin ? ".exe" : "";
+    const binDir = path.resolve(__dirname, "../bin");
+    const rtpServerDir = path.resolve(__dirname, "../rust-rtp-server");
+    // On Linux, check for cross-compiled binary name first (ari-rtp-server-linux)
+    const deployedBin = isWin
+      ? path.join(binDir, "ari-rtp-server.exe")
+      : path.join(binDir, "ari-rtp-server-linux");
+    const deployedBinFallback = path.join(binDir, "ari-rtp-server" + ext);
+    const releaseBin = path.join(rtpServerDir, "target/release/ari-rtp-server" + ext);
+    const debugBin = path.join(rtpServerDir, "target/debug/ari-rtp-server" + ext);
 
-transcriber.on("close", () => {
-  console.log("transcriber closed");
+    let binPath: string;
+    if (fs.existsSync(deployedBin)) {
+      binPath = deployedBin;
+    } else if (fs.existsSync(deployedBinFallback)) {
+      binPath = deployedBinFallback;
+    } else if (fs.existsSync(releaseBin)) {
+      binPath = releaseBin;
+    } else if (fs.existsSync(debugBin)) {
+      binPath = debugBin;
+      console.log("[Manager] Warning: using debug build, run 'npm run build:rtp' for better performance");
+    } else {
+      reject(new Error(`Rust RTP binary not found. Run 'npm run build:rtp' first.`));
+      return;
+    }
 
-  //controller.stop();
-});
+    console.log(`[Manager] Starting Rust RTP server: ${binPath}`);
+    rustProcess = spawn(binPath, [], {
+      cwd: rtpServerDir,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env },
+    });
 
-// Handle SIGINT signal to gracefully stop the servers
-process.on("SIGINT", async () => {
-  await controller.close();
-  process.exit();
-});
+    rustProcess.stdout.on("data", (data: Buffer) => {
+      const line = data.toString().trim();
+      if (line) console.log(`[Rust] ${line}`);
+    });
 
-// Start the AriControllerServer
-controller.start(contacts).then(() => {
+    rustProcess.stderr.on("data", (data: Buffer) => {
+      const line = data.toString().trim();
+      if (line) console.log(`[Rust] ${line}`);
+    });
+
+    rustProcess.on("error", (err: Error) => {
+      reject(new Error(`Failed to start Rust RTP server: ${err.message}`));
+    });
+
+    rustProcess.on("exit", (code: number) => {
+      console.log(`[Manager] Rust RTP server exited with code ${code}`);
+      rustProcess = null;
+    });
+
+    // Poll health endpoint until ready
+    const maxWait = 10000;
+    const interval = 200;
+    let elapsed = 0;
+
+    const check = () => {
+      fetch(`${url}/health`)
+        .then((res) => {
+          if (res.ok) {
+            console.log("[Manager] Rust RTP server is ready");
+            resolve();
+          } else {
+            retry();
+          }
+        })
+        .catch(() => retry());
+    };
+
+    const retry = () => {
+      elapsed += interval;
+      if (elapsed >= maxWait) {
+        reject(new Error("Rust RTP server did not become ready in time"));
+      } else {
+        setTimeout(check, interval);
+      }
+    };
+
+    // Give it a moment to start before first check
+    setTimeout(check, 300);
+  });
+}
+
+async function main() {
+  if (useRustRtp) {
+    try {
+      await startRustServer(rustServerUrl);
+    } catch (err: any) {
+      console.error(`[Manager] ${err.message}`);
+      process.exit(1);
+    }
+  } else {
+    // Legacy: Node.js handles RTP + transcription internally
+    const options = {
+      sslCert: "",
+      sslKey: "path/to/ssl/private/key.key",
+      wssPort: parseInt(process.env.WSS_PORT || "3044", 10),
+      format: "slin16",
+      speechLang: "en-US",
+      speechModel: "default",
+      speakerDiarization: false,
+      listenServer: process.env.LISTENER_SERVER,
+      audioOutput: "audio.raw",
+    };
+    transcriber = new AriTranscriber(options);
+    console.log("[Manager] Using Node.js internal RTP + transcription");
+  }
+
+  const controller = new AriControllerServer(
+    pbxIP, accessKey, secretKey,
+    useRustRtp ? rustServerUrl : undefined
+  );
+
+  controller.on("close", () => {
+    console.log("controller closed");
+  });
+
+  if (transcriber) {
+    transcriber.on("close", () => {
+      console.log("transcriber closed");
+    });
+  }
+
+  // Handle SIGINT signal to gracefully stop the servers
+  process.on("SIGINT", async () => {
+    await controller.close();
+    if (rustProcess) {
+      console.log("[Manager] Stopping Rust RTP server...");
+      rustProcess.kill("SIGTERM");
+    }
+    process.exit();
+  });
+
+  // Start the AriControllerServer
+  await controller.start(contacts);
+
   // Start auto-dialer campaign if configured
   const phoneListPath = process.env.AUTODIALER_PHONE_LIST;
   if (phoneListPath) {
@@ -129,6 +242,11 @@ controller.start(contacts).then(() => {
       console.error("[Manager] Failed to start auto-dialer:", err.message);
     }
   }
+}
+
+main().catch((err) => {
+  console.error("[Manager] Fatal error:", err);
+  process.exit(1);
 });
 
 //TODO: add methods to start and stop the transcriber and controller in case if one of them fails or is closed

@@ -1,0 +1,77 @@
+name: Build RTP Server
+
+on:
+  push:
+    paths:
+      - 'rust-rtp-server/**'
+    branches: [main]
+  workflow_dispatch:  # manual trigger
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            binary: ari-rtp-server-linux
+            src: rust-rtp-server/target/release/ari-rtp-server
+          - os: windows-latest
+            binary: ari-rtp-server.exe
+            src: rust-rtp-server/target/release/ari-rtp-server.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust-rtp-server/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust-rtp-server/Cargo.lock') }}
+
+      - name: Build release
+        working-directory: rust-rtp-server
+        run: cargo build --release
+
+      - name: Copy binary to bin/
+        run: |
+          mkdir -p bin
+          cp ${{ matrix.src }} bin/${{ matrix.binary }}
+        shell: bash
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary }}
+          path: bin/${{ matrix.binary }}
+
+  commit-binaries:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: bin/
+          merge-multiple: true
+
+      - name: Commit binaries to bin/
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add bin/
+          git diff --staged --quiet && echo "No changes" && exit 0
+          git commit -m "build: update RTP server binaries [skip ci]"
+          git push

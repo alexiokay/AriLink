@@ -212,6 +212,7 @@ Web-based dashboard for monitoring and management. Only build features FreePBX c
 | **Security/Auth** | High (prod) | Medium | 1 week | None |
 | **Analytics** | Low | Medium | 2 weeks | Database |
 | **CRM Integration** | Low | Medium | 1 week/CRM | None |
+| **MCP Server Integration**| HIGH | Medium | 1 week | None |
 
 ---
 
@@ -243,7 +244,13 @@ Web-based dashboard for monitoring and management. Only build features FreePBX c
 - Call recording
 - Basic web UI (campaigns + monitoring)
 
-### Phase 4: Product
+### Phase 4: AI & Connectivity (MCP)
+- Create AriLink MCP Server (`core/MCPServer.ts`)
+- Expose ARI tools (originate, play, transfer) to AI agents
+- Implement real-time transcription resources for MCP
+- **Plan:** [MCP-INTEGRATION-PLAN.md](MCP-INTEGRATION-PLAN.md)
+
+### Phase 5: Product
 - Full web dashboard
 - Sound file management GUI
 - Analytics & reporting

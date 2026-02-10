@@ -41,12 +41,14 @@ class AriControllerServer extends EventEmitter {
   private ws: any;
   private contacts: any;
   private sessionManager: InstanceType<typeof CallSessionManager>;
+  private useRustRtp: boolean;
+  private rustServerUrl: string | undefined;
 
   // Map to store per-session WebSocket message handlers
   private sessionMessageHandlers: Map<string, (message: any) => void> =
     new Map();
 
-  constructor(pbxIP: string, accessKey: string, secretKey: string) {
+  constructor(pbxIP: string, accessKey: string, secretKey: string, rustServerUrl?: string) {
     super();
     this.pbxIP = pbxIP;
     this.accessKey = accessKey;
@@ -56,6 +58,9 @@ class AriControllerServer extends EventEmitter {
     this.udpServer = null;
     this.transcriptionServerIp = "0.0.0.0";
     this.transcriptionServerPort = "3044";
+
+    this.useRustRtp = !!rustServerUrl;
+    this.rustServerUrl = rustServerUrl;
 
     // Use the session manager for multi-call support
     this.sessionManager = sessionManager;
@@ -139,12 +144,16 @@ class AriControllerServer extends EventEmitter {
 
     console.log("Client connected");
 
-    this.ws = new WebSocket(
-      `ws://${this.transcriptionServerIp}:${this.transcriptionServerPort}`
-    );
+    // Connect to either Rust RTP server or legacy Node.js transcription server
+    const wsUrl = this.useRustRtp
+      ? `${this.rustServerUrl!.replace(/^http/, "ws")}/ws`
+      : `ws://${this.transcriptionServerIp}:${this.transcriptionServerPort}`;
+
+    console.log(`[Controller] Connecting WebSocket to: ${wsUrl}`);
+    this.ws = new WebSocket(wsUrl);
 
     this.ws.onopen = () => {
-      console.log("WebSocket connection to AriTranscriber server established");
+      console.log(`WebSocket connection established (${this.useRustRtp ? "Rust RTP" : "Node.js transcriber"})`);
     };
 
     // Central message router - routes transcriptions to the correct session handler
@@ -243,6 +252,9 @@ class AriControllerServer extends EventEmitter {
     // Add incoming channel to its dedicated bridge
     this.addChannelToBridge(channel, bridge);
 
+    // Create Rust RTP session (before ExternalMedia so it's ready to receive audio)
+    await this.createRustSession(sessionId);
+
     // Create external media channel for transcription
     await this.createExternalMediaChannelForSession(sessionId);
 
@@ -332,6 +344,7 @@ class AriControllerServer extends EventEmitter {
       // Contact matched, initiate outgoing call
       this.initiateOutgoingCall(session, channel, data.number);
       this.sessionMessageHandlers.delete(sessionId);
+      this.deleteRustSession(sessionId);
     });
 
     // Handle generic transfer request
@@ -339,6 +352,7 @@ class AriControllerServer extends EventEmitter {
       console.log(`[Session ${sessionId}] Transfer requested to: ${data.endpoint}`);
       this.initiateOutgoingCall(session, channel, data.endpoint);
       this.sessionMessageHandlers.delete(sessionId);
+      this.deleteRustSession(sessionId);
     });
   }
 
@@ -533,6 +547,9 @@ class AriControllerServer extends EventEmitter {
       // Clean up the session's message handler
       this.sessionMessageHandlers.delete(session.id);
 
+      // Clean up Rust RTP session
+      this.deleteRustSession(session.id);
+
       // End only this session, not all calls
       this.sessionManager.endSession(session.id);
     } else {
@@ -558,10 +575,10 @@ class AriControllerServer extends EventEmitter {
     const ariEndpoint = `http://${this.pbxIP}:8088/ari`;
     const appName = process.env.STASIS_APP_NAME || "stasis-app";
     const externalHost = process.env.EXTERNAL_HOST;
-    const format = "slin16"; // Raw PCM 8kHz - testing for better audio playback
+    const format = "slin16";
     const username = process.env.ASTERISK_LOGIN;
     const password = process.env.ASTERISK_PASSWORD;
-    const port = 8000;
+    const port = parseInt(process.env.RTP_LISTEN_PORT || "8000", 10);
 
     const url = `${ariEndpoint}/channels/externalMedia?app=${appName}&external_host=${externalHost}%3A${port}&format=${format}`;
 
@@ -589,6 +606,51 @@ class AriControllerServer extends EventEmitter {
         `[Session ${sessionId}] Error creating ExternalMedia channel:`,
         error.message
       );
+    }
+  }
+
+  /**
+   * Create a session on the Rust RTP server (only when USE_RUST_RTP is active)
+   */
+  async createRustSession(sessionId: string): Promise<void> {
+    if (!this.useRustRtp) return;
+
+    const transcriptionServices = (process.env.TRANSCRIPTION_SERVICES || "")
+      .split(",")
+      .map((s: string) => s.trim())
+      .filter((s: string) => s.length > 0);
+
+    try {
+      const response = await fetch(`${this.rustServerUrl}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          codec: "slin16",
+          transcription_services: transcriptionServices,
+        }),
+      });
+
+      const data = await response.json();
+      console.log(`[Session ${sessionId}] Rust session created:`, data);
+    } catch (error: any) {
+      console.error(`[Session ${sessionId}] Failed to create Rust session:`, error.message);
+    }
+  }
+
+  /**
+   * Delete a session on the Rust RTP server (only when USE_RUST_RTP is active)
+   */
+  async deleteRustSession(sessionId: string): Promise<void> {
+    if (!this.useRustRtp) return;
+
+    try {
+      await fetch(`${this.rustServerUrl}/sessions/${sessionId}`, {
+        method: "DELETE",
+      });
+      console.log(`[Session ${sessionId}] Rust session deleted`);
+    } catch (error: any) {
+      console.error(`[Session ${sessionId}] Failed to delete Rust session:`, error.message);
     }
   }
 
