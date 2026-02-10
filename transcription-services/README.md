@@ -1,6 +1,6 @@
 # Transcription Services
 
-This folder contains different transcription backend services that can be used with the ARI Stasi Server.
+This folder contains different transcription backend services that can be used with the AriLink.
 
 ## Available Services
 

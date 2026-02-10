@@ -210,7 +210,7 @@ Approximate transcription speed (RTF = Real-Time Factor):
 
 **RTF 5x** = processes 5 seconds of audio in 1 second (more than enough for real-time)
 
-## 🔗 Integration with ARI Stasi Server
+## 🔗 Integration with AriLink
 
 The Node.js server will connect to this service automatically. No additional configuration needed once the service is running.
 

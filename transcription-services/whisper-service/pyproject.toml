@@ -1,7 +1,7 @@
 [project]
 name = "whisper-transcription-service"
 version = "1.0.0"
-description = "Local Whisper transcription service for ARI Stasi Server"
+description = "Local Whisper transcription service for AriLink"
 requires-python = ">=3.10"
 dependencies = [
     "faster-whisper>=1.0.0",

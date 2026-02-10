@@ -1,6 +1,6 @@
 # 🤖 Assistant Architecture
 
-Comprehensive guide to the modular assistant system for ARI Stasi Server.
+Comprehensive guide to the modular assistant system for AriLink.
 
 ---
 
@@ -39,7 +39,7 @@ graph TB
         ARI[ARI Interface]
     end
 
-    subgraph "ARI Stasi Server"
+    subgraph "AriLink"
         subgraph "Core Infrastructure"
             Controller[AriControllerServer]
             Transcriber[AriTranscriberServer]
@@ -303,7 +303,7 @@ stateDiagram-v2
 ### 📁 Directory Structure
 
 ```
-ari-stasi-server/
+arilink/
 ├── assistants/
 │   ├── base/
 │   │   ├── AssistantInterface.ts      # Interface definition

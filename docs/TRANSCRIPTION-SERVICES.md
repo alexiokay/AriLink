@@ -1,6 +1,6 @@
 # Transcription Services Guide
 
-Choose between different transcription backends for your ARI Stasi server.
+Choose between different transcription backends for your AriLink server.
 
 ## Available Services
 

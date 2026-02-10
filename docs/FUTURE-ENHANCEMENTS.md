@@ -222,7 +222,7 @@ Web-based dashboard for monitoring calls, viewing transcriptions, and managing t
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ 🎙️ VoiceFlow          [Notifications] [User Menu]  │
+│ 🎙️ AriLink          [Notifications] [User Menu]  │
 ├─────────────────────────────────────────────────────┤
 │ 📊 Dashboard  📞 Calls  📈 Analytics  ⚙️ Settings  │
 ├─────────────────────────────────────────────────────┤

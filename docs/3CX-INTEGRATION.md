@@ -1,6 +1,8 @@
 # 3CX Integration Guide
 
-This guide explains how to integrate your ARI Stasi Server with 3CX to route calls to Ring Groups after voice capture.
+This guide explains how to integrate your AriLink with 3CX to route calls to Ring Groups after voice capture.
+
+> **📖 Prerequisites:** Make sure you've completed [FREEPBX-ARI-CONFIGURATION.md](./FREEPBX-ARI-CONFIGURATION.md) first (ARI user, basic dialplan, HTTP server).
 
 ---
 
@@ -246,7 +248,6 @@ Add to your `.env` file:
 # 3CX Integration
 RING_GROUP_3CX=600
 TRUNK_3CX=3cx-trunk
-3CX_SERVER_IP=192.168.1.100
 ```
 
 ### Update `.env.example`
@@ -255,7 +256,6 @@ TRUNK_3CX=3cx-trunk
 # 3CX Integration (Required for client deployment)
 RING_GROUP_3CX=600                    # Ring Group extension in 3CX
 TRUNK_3CX=3cx-trunk                   # SIP trunk name configured in FreePBX
-3CX_SERVER_IP=192.168.1.100           # 3CX server IP address
 ```
 
 ### Implementation in AriControllerServer.ts
@@ -284,7 +284,7 @@ private async transferTo3CXRingGroup(
 
     const outgoingChannelParams = {
       endpoint: endpoint,
-      app: "hello-world",
+      app: "stasis-app",
       callerId: session.callerNumber,
       appArgs: "to-3cx",
       headers: {

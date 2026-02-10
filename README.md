@@ -1,4 +1,4 @@
-# 📞 VoiceFlow (ARI Stasi Server)
+# 📞 AriLink
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8.3-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-23.x-green.svg)](https://nodejs.org/)
@@ -7,7 +7,7 @@
 
 <p align="center">
   <!-- Replace with your own logo when available -->
-  <img src="./header.webp" alt="VoiceFlow Logo" width="100%" />
+  <img src="./header.webp" alt="AriLink Logo" width="100%" />
   <br>
   <em><a href="https://asterisk.org"><img src="https://asterisk.org/wp-content/uploads/asterisk-logo.png" alt="Asterisk" width="50" style="vertical-align: middle;"/></a>-powered telephony management with speech recognition and transcription</em>
 </p>
@@ -16,7 +16,7 @@
 
 ## 📋 Overview
 
-TranscriptARI is a sophisticated telephony management system built on Asterisk's ARI (Asterisk REST Interface). It provides voice call handling, transcription, and PBX control capabilities. The system combines WebSockets, RTP, and Google Speech-to-Text integration to create a modern, feature-rich telephony solution.
+AriLink is a telephony management system built on Asterisk's ARI (Asterisk REST Interface). It provides voice call handling, transcription, and PBX control capabilities. The system combines WebSockets, RTP, and speech-to-text integration to create a modern, feature-rich telephony solution.
 
 ## ✨ Key Features
 
@@ -118,7 +118,9 @@ The system uses environment variables for configuration, including:
 
 ### Prerequisites
 
-1. **Set up FreePBX server** - [FreePBX Server Installation and Configuration Guide](freepbx-setup.md)
+1. **Set up FreePBX server**:
+   - 📦 **New installation?** [FreePBX Installation Guide](docs/freepbx-setup.md) - VM setup and FreePBX installation
+   - ⚙️ **Already installed?** [FreePBX ARI Configuration](docs/FREEPBX-ARI-CONFIGURATION.md) - Configure for AriLink
 2. **Install UV** (Python package manager):
    ```powershell
    # Windows PowerShell
@@ -168,7 +170,7 @@ The system uses environment variables for configuration, including:
    ```
    First run will download the model (~800MB for Whisper, ~600MB for Parakeet)
 
-2. **Start ARI Stasi Server** (in terminal 2):
+2. **Start AriLink Server** (in terminal 2):
    ```bash
    npm start
    ```

@@ -1,5 +1,5 @@
 ---
-title: "📞 VoiceFlow Analytics & Docs"
+title: "📞 AriLink Analytics & Docs"
 subtitle: "Interactive Documentation Demo"
 author: "Antigravity Assistant"
 date: last-modified
@@ -109,7 +109,7 @@ sequenceDiagram
 
 ## 📝 Description
 
-The **VoiceFlow** system handles calls in real-time.
+The **AriLink** system handles calls in real-time.
 - **RTP Stream**: Audio is intercepted and sent to Google.
 - **WebSocket**: Transcription updates are pushed to the frontend.
 - **Latency**: Typically < 500ms for partial results.

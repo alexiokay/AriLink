@@ -1,6 +1,9 @@
-# 📞 FreePBX Dialplan Configuration for ARI Stasis
+# 📞 FreePBX Dialplan Configuration for AriLinks
 
-Complete guide to routing calls through your ARI Stasi application for real-time transcription.
+Advanced routing strategies for your AriLink application. Choose the routing strategy that best fits your needs.
+
+> **📖 For basic dialplan setup** (`[stasis-app]` + `[from-trunk-custom]`), see [FREEPBX-ARI-CONFIGURATION.md](./FREEPBX-ARI-CONFIGURATION.md#2%EF%B8%8F%E2%83%A3-configure-custom-dialplan).
+> **📖 For 3CX-specific routing** (`[to-3cx]` context), see [3CX-INTEGRATION.md](./3CX-INTEGRATION.md#part-3-create-custom-dialplan-recommended).
 
 ---
 
@@ -19,25 +22,15 @@ Choose the routing strategy that fits your needs:
 
 ## Option 1: Route ALL Calls Through Stasis
 
-Add this to **Admin** → **Config Edit** → **extensions_custom.conf**:
+The [basic dialplan setup](./FREEPBX-ARI-CONFIGURATION.md#2%EF%B8%8F%E2%83%A3-configure-custom-dialplan) already routes **trunk calls** through Stasis. To also catch **internal** and **queue** calls, add these contexts to `extensions_custom.conf`:
 
 ```ini
 ; ============================================
 ; CATCH ALL INTERNAL CALLS
 ; ============================================
 [from-internal-custom]
-; Catch any extension dialed internally
 exten => _X.,1,NoOp(ARI: Internal call from ${CALLERID(num)} to ${EXTEN})
- same => n,Stasis(hello-world,${EXTEN},${CALLERID(num)})
- same => n,Hangup()
-
-; ============================================
-; CATCH ALL INCOMING CALLS FROM TRUNKS
-; ============================================
-[from-trunk-custom]
-; Catch any incoming call
-exten => _X.,1,NoOp(ARI: Incoming call from ${CALLERID(num)} to ${EXTEN})
- same => n,Stasis(hello-world,${EXTEN},${CALLERID(num)})
+ same => n,Stasis(stasis-app,${EXTEN},${CALLERID(num)})
  same => n,Hangup()
 
 ; ============================================
@@ -45,38 +38,24 @@ exten => _X.,1,NoOp(ARI: Incoming call from ${CALLERID(num)} to ${EXTEN})
 ; ============================================
 [from-queue-custom]
 exten => _X.,1,NoOp(ARI: Queue call to ${EXTEN})
- same => n,Stasis(hello-world,${EXTEN},${CALLERID(num)})
+ same => n,Stasis(stasis-app,${EXTEN},${CALLERID(num)})
  same => n,Hangup()
 ```
 
-## After Adding Configuration
-
-### 1. Save the file
-
-### 2. Reload dialplan:
+Reload and verify:
 ```bash
 asterisk -rx "dialplan reload"
-```
-
-### 3. Verify it works:
-```bash
-# Check internal context
 asterisk -rx "dialplan show from-internal-custom"
-
-# Check trunk context
-asterisk -rx "dialplan show from-trunk-custom"
 ```
 
-## What This Does
+**Result**: Combined with the basic setup, ALL calls go through your AriLink server:
 
 | Call Type | Example | Will Route? |
 |-----------|---------|-------------|
 | **Internal: Ext → Ext** | 101 calls 102 | ✅ YES |
-| **Incoming: External → Ext** | Outside → 101 | ✅ YES |
+| **Incoming: External → Ext** | Outside → 101 | ✅ YES (from basic setup) |
 | **Outgoing: Ext → External** | 101 → Outside | ✅ YES |
 | **Queue calls** | Caller → Queue | ✅ YES |
-
-**Result**: ALL calls go through your ARI Stasi server for transcription! 🎉
 
 ---
 
@@ -88,12 +67,12 @@ Route only certain extensions (e.g., customer service extensions 101-110):
 [from-internal-custom]
 ; Route extensions 101-110 through Stasis
 exten => _10[0-9],1,NoOp(ARI: Customer service extension ${EXTEN})
- same => n,Stasis(hello-world,${EXTEN},${CALLERID(num)})
+ same => n,Stasis(stasis-app,${EXTEN},${CALLERID(num)})
  same => n,Hangup()
 
 ; Route extensions 201-210 through Stasis
 exten => _20[0-9],1,NoOp(ARI: Sales extension ${EXTEN})
- same => n,Stasis(hello-world,${EXTEN},${CALLERID(num)})
+ same => n,Stasis(stasis-app,${EXTEN},${CALLERID(num)})
  same => n,Hangup()
 
 ; All other extensions use normal FreePBX routing
@@ -122,7 +101,7 @@ exten => 0,1,NoOp(Operator - skip Stasis)
 
 ; Route everything else through Stasis
 exten => _X.,1,NoOp(ARI: Normal call from ${CALLERID(num)} to ${EXTEN})
- same => n,Stasis(hello-world,${EXTEN},${CALLERID(num)})
+ same => n,Stasis(stasis-app,${EXTEN},${CALLERID(num)})
  same => n,Hangup()
 ```
 
@@ -138,7 +117,7 @@ Only transcribe internal extension-to-extension calls:
 [from-internal-custom]
 ; Only intercept 3-digit internal extensions
 exten => _XXX,1,NoOp(ARI: Internal call from ${CALLERID(num)} to ${EXTEN})
- same => n,Stasis(hello-world,${EXTEN},${CALLERID(num)})
+ same => n,Stasis(stasis-app,${EXTEN},${CALLERID(num)})
  same => n,Hangup()
 
 ; External calls (10+ digits) use normal routing
@@ -156,15 +135,15 @@ Route based on caller ID, time of day, or other conditions:
 ; Route VIP customers (based on caller ID)
 exten => _X.,1,GotoIf($[${CALLERID(num)} = 5551234567]?vip:normal)
  same => n(vip),NoOp(VIP caller - priority routing)
- same => n,Stasis(hello-world-vip,${EXTEN},${CALLERID(num)})
+ same => n,Stasis(stasis-app-vip,${EXTEN},${CALLERID(num)})
  same => n,Hangup()
  same => n(normal),NoOp(Normal caller)
- same => n,Stasis(hello-world,${EXTEN},${CALLERID(num)})
+ same => n,Stasis(stasis-app,${EXTEN},${CALLERID(num)})
  same => n,Hangup()
 
 ; Route based on time of day
 exten => 100,1,GotoIfTime(9:00-17:00,mon-fri,*,*?business_hours:after_hours)
- same => n(business_hours),Stasis(hello-world,${EXTEN},${CALLERID(num)})
+ same => n(business_hours),Stasis(stasis-app,${EXTEN},${CALLERID(num)})
  same => n,Hangup()
  same => n(after_hours),Playback(office-closed)
  same => n,Hangup()
@@ -179,33 +158,6 @@ exten => 100,1,GotoIfTime(9:00-17:00,mon-fri,*,*?business_hours:after_hours)
    Channel PJSIP/xxx-xxx just entered the Stasis application
    [SessionManager] Created session call-xxx-xxx
    ```
-
----
-
-## 🔧 After Making Changes
-
-### 1. Save Configuration
-Click "Submit" in FreePBX Config Edit interface
-
-### 2. Reload Dialplan
-```bash
-asterisk -rx "dialplan reload"
-```
-
-### 3. Verify Configuration
-```bash
-# Check your custom context exists
-asterisk -rx "dialplan show from-internal-custom"
-
-# Should show your custom extensions
-```
-
-### 4. Test with a Call
-Make a test call and check your ARI server logs for:
-```
-Channel PJSIP/xxx-xxx just entered the Stasis application
-[SessionManager] Created session call-xxx-xxx
-```
 
 ---
 
@@ -268,7 +220,7 @@ exten => 911,1,NoOp(Emergency bypass)
  same => n,Goto(from-internal,911,1)
 
 ; Then catch-all
-exten => _X.,1,Stasis(hello-world,${EXTEN},${CALLERID(num)})
+exten => _X.,1,Stasis(stasis-app,${EXTEN},${CALLERID(num)})
  same => n,Hangup()
 ```
 
@@ -276,18 +228,7 @@ exten => _X.,1,Stasis(hello-world,${EXTEN},${CALLERID(num)})
 
 ### Problem: Calls Hang Up Immediately
 
-**Check:**
-1. Is your ARI Stasi server running?
-2. Is it connected to FreePBX ARI?
-3. Check ARI server logs for errors
-
-**Test ARI Connection:**
-```bash
-# Check if ARI is enabled
-asterisk -rx "http show status"
-
-# Should show: HTTP Server Status: Enabled
-```
+Ensure your AriLink server is running and connected to FreePBX ARI. See [FREEPBX-ARI-CONFIGURATION.md Troubleshooting](./FREEPBX-ARI-CONFIGURATION.md#-troubleshooting) for ARI connection issues.
 
 ---
 
@@ -327,9 +268,10 @@ asterisk -rx "http show status"
 
 ## 📚 Related Documentation
 
-- [FreePBX Setup Guide](freepbx-setup.md) - Initial FreePBX configuration
-- [ARI Documentation](https://wiki.asterisk.org/wiki/display/AST/Asterisk+REST+Interface) - Official Asterisk ARI docs
-- [Dialplan Patterns](https://wiki.asterisk.org/wiki/display/AST/Pattern+Matching) - Complete pattern matching reference
+- [FreePBX ARI Configuration](FREEPBX-ARI-CONFIGURATION.md) - ARI setup, basic dialplan, NAT, firewall
+- [3CX Integration Guide](3CX-INTEGRATION.md) - 3CX trunk and routing configuration
+- [FreePBX Installation Guide](freepbx-setup.md) - Initial FreePBX installation
+- [Dialplan Patterns](https://wiki.asterisk.org/wiki/display/AST/Pattern+Matching) - Official Asterisk pattern matching reference
 
 ---
 

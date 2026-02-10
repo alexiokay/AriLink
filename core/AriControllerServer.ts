@@ -121,7 +121,9 @@ class AriControllerServer extends EventEmitter {
     this.client.on("StasisEnd", this.stasisEnd.bind(this));
     this.client.on("ChannelDtmfReceived", this.dtmfReceived.bind(this));
 
-    this.client.start("hello-world");
+    const appName = process.env.STASIS_APP_NAME || "stasis-app";
+    console.log(`Starting ARI application: ${appName}`);
+    this.client.start(appName);
   }
 
   startWebServer() {
@@ -357,10 +359,11 @@ class AriControllerServer extends EventEmitter {
     const endpoint = `PJSIP/${ringGroup}@${trunkName}`;
 
     const fromNumber = channel.caller?.number || process.env.FROM_NUMBER || "unknown";
+    const appName = process.env.STASIS_APP_NAME || "stasis-app";
 
     const outgoingChannelParams = {
       endpoint: endpoint,
-      app: "hello-world",
+      app: appName,
       callerId: fromNumber,
       appArgs: "dialed",
       headers: {
@@ -427,10 +430,11 @@ class AriControllerServer extends EventEmitter {
   ) {
     const fromNumber = process.env.FROM_NUMBER || "unknown";
     const sipProvider = process.env.SIP_PROVIDER;
+    const appName = process.env.STASIS_APP_NAME || "stasis-app";
 
     const outgoingChannelParams = {
       endpoint: `Local/${recipient}@from-internal`,
-      app: "hello-world",
+      app: appName,
       callerId: fromNumber,
       appArgs: "dialed",
       headers: {
@@ -554,7 +558,7 @@ class AriControllerServer extends EventEmitter {
 
   async createExternalMediaChannelForSession(sessionId: string): Promise<void> {
     const ariEndpoint = `http://${this.pbxIP}:8088/ari`;
-    const appName = "hello-world";
+    const appName = process.env.STASIS_APP_NAME || "stasis-app";
     const externalHost = process.env.EXTERNAL_HOST;
     const format = "slin16"; // Raw PCM 8kHz - testing for better audio playback
     const username = process.env.ASTERISK_LOGIN;

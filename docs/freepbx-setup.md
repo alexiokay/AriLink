@@ -9,7 +9,7 @@ https://www.freepbx.org/get-started/
 <div align="center">
   <img src="https://www.freepbx.org/wp-content/uploads/Sangoma_FreePBX_Logo_RGB_hori-pos-e1588854523908.png" alt="FreePBX Logo" width="300"/>
   <br>
-  <em>Complete guide to setting up and configuring your FreePBX server for use with ARI Stasi</em>
+  <em>Complete guide to setting up and configuring your FreePBX server for use with AriLink</em>
 </div>
 
 ---
@@ -294,8 +294,11 @@ If you get error with line 1174, this is often related to date/time synchronizat
 
 <img src="https://cdn-icons-png.flaticon.com/512/2885/2885417.png" alt="API" width="50" align="right"/>
 
+> **📖 For detailed ARI + 3CX + Dialplan configuration, see [FREEPBX-ARI-CONFIGURATION.md](FREEPBX-ARI-CONFIGURATION.md)**
+> That guide covers config file method, custom dialplan, 3CX trunk setup, NAT, and firewall.
+
 <details open>
-<summary><b>ARI Configuration Steps</b></summary>
+<summary><b>ARI Configuration Steps (GUI Method)</b></summary>
 <p>
 
 1. Access the FreePBX web interface using your browser: `http://<your-vm-ip>`
@@ -316,7 +319,7 @@ If you get error with line 1174, this is often related to date/time synchronizat
    - Navigate to: **Settings** → **Advanced Settings** 
    - Check **Display readonly settings** (and optionally **Override readonly settings** if you want to change credentials)
    - Search for **ARI username**
-   - Copy the credentials to your `.env` file in the ARI Stasi application
+   - Copy the credentials to your `.env` file in the AriLink application
 
 </p>
 </details>
@@ -345,8 +348,11 @@ The default configuration uses Google Speech API, but you can consider these alt
 
 <img src="https://cdn-icons-png.flaticon.com/512/5778/5778578.png" alt="SIP" width="50" align="right"/>
 
+> **📖 For 3CX-specific trunk setup, see [FREEPBX-ARI-CONFIGURATION.md](FREEPBX-ARI-CONFIGURATION.md#3%EF%B8%8F%E2%83%A3-create-sip-trunk-to-3cx)** (local and cloud-hosted)
+> **📖 For 3CX integration details, see [3CX-INTEGRATION.md](3CX-INTEGRATION.md)**
+
 <details open>
-<summary><b>Setting up SIP Trunks</b></summary>
+<summary><b>Setting up SIP Trunks (General)</b></summary>
 <p>
 
 Configure your SIP trunk provider in FreePBX:
@@ -456,11 +462,14 @@ this.playAudio(channel, "custom/try_again");  // Plays /var/lib/asterisk/sounds/
 
 <img src="https://cdn-icons-png.flaticon.com/512/3064/3064197.png" alt="Dialplan" width="50" align="right"/>
 
+> **📖 For step-by-step dialplan setup, see [FREEPBX-ARI-CONFIGURATION.md](FREEPBX-ARI-CONFIGURATION.md#2%EF%B8%8F%E2%83%A3-configure-custom-dialplan)**
+> **📖 For advanced routing options, see [DIALPLAN-CONFIG.md](DIALPLAN-CONFIG.md)**
+
 <details open>
-<summary><b>Routing Calls to ARI Stasis Application</b></summary>
+<summary><b>Routing Calls to AriLink Application</b></summary>
 <p>
 
-To route calls through your ARI Stasi application for transcription, configure custom dialplan contexts.
+To route calls through your AriLink application for transcription, configure custom dialplan contexts.
 
 **📖 Complete Dialplan Guide:**
 👉 **[DIALPLAN-CONFIG.md](DIALPLAN-CONFIG.md)**
@@ -479,7 +488,7 @@ Navigate to **Admin** → **Config Edit** → **extensions_custom.conf** and add
 ```ini
 [from-internal-custom]
 exten => _X.,1,NoOp(ARI: Call from ${CALLERID(num)} to ${EXTEN})
- same => n,Stasis(hello-world,${EXTEN},${CALLERID(num)})
+ same => n,Stasis(stasis-app,${EXTEN},${CALLERID(num)})
  same => n,Hangup()
 ```
 
@@ -503,7 +512,7 @@ For advanced configurations, see **[DIALPLAN-CONFIG.md](DIALPLAN-CONFIG.md)**.
 
 1. **Upload test audio file** to `/var/lib/asterisk/sounds/custom/`
 2. **Configure dialplan** to route calls through Stasis
-3. **Start your ARI Stasi Server** and connect to FreePBX
+3. **Start your AriLink Server** and connect to FreePBX
 4. **Make a test call** and verify:
    - Call routes to your application
    - Custom audio plays correctly
@@ -534,5 +543,8 @@ For advanced configurations, see **[DIALPLAN-CONFIG.md](DIALPLAN-CONFIG.md)**.
 
 
 
-things to have in mind.
-Voice menu recordings needs to be uploaded directly to asterisk serer to path: /var/lib/asterisk/sounds/custom/ or /var/lib/asterisk/sounds/en/custom/ etc.
+## 📝 Quick Reference Notes
+
+- Voice menu recordings must be uploaded directly to: `/var/lib/asterisk/sounds/custom/` or `/var/lib/asterisk/sounds/en/custom/`
+- For ARI auth setup, see [FREEPBX-ARI-CONFIGURATION.md](FREEPBX-ARI-CONFIGURATION.md#1%EF%B8%8F%E2%83%A3-create-ari-user)
+- For inbound route setup, see [FREEPBX-ARI-CONFIGURATION.md](FREEPBX-ARI-CONFIGURATION.md#2%EF%B8%8F%E2%83%A3-configure-custom-dialplan)
