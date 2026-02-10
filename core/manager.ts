@@ -41,6 +41,7 @@ const contacts = convertJSONFileToHashMap(jsonFilePath);
 console.log("Contacts:", contacts);
 
 const { AriControllerServer } = require("./AriControllerServer");
+const { AutoDialer } = require("./AutoDialer");
 
 // Specify the options for the transcriber
 const options = {
@@ -84,7 +85,23 @@ process.on("SIGINT", async () => {
 });
 
 // Start the AriControllerServer
-controller.start(contacts);
+controller.start(contacts).then(() => {
+  // Start auto-dialer campaign if configured
+  const phoneListPath = process.env.AUTODIALER_PHONE_LIST;
+  if (phoneListPath) {
+    const autoDialer = new AutoDialer(controller.getClient());
+    try {
+      autoDialer.loadPhoneList(phoneListPath);
+      autoDialer.start();
+
+      autoDialer.on("campaignComplete", (data: any) => {
+        console.log("[Manager] Auto-dialer campaign finished");
+      });
+    } catch (err: any) {
+      console.error("[Manager] Failed to start auto-dialer:", err.message);
+    }
+  }
+});
 
 //TODO: add methods to start and stop the transcriber and controller in case if one of them fails or is closed
 export {};

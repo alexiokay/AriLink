@@ -1,4 +1,4 @@
-# 📞 FreePBX Dialplan Configuration for AriLinks
+# 📞 FreePBX Dialplan Configuration for AriLink
 
 Advanced routing strategies for your AriLink application. Choose the routing strategy that best fits your needs.
 

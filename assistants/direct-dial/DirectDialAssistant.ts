@@ -1,4 +1,6 @@
 const { BaseAssistant } = require("../base/BaseAssistant");
+const { ContactMatcher } = require("../../tools/ContactMatcher");
+const { RetryManager } = require("../../tools/RetryManager");
 
 import type { AssistantConfig, AssistantState } from "../base/AssistantTypes";
 
@@ -10,17 +12,28 @@ const directDialConfig: AssistantConfig = require("./config.json");
  * Replicates the original call flow:
  * 1. Play welcome prompt
  * 2. Listen for voice immediately (no DTMF gate)
- * 3. Match transcription against contacts (findNumberByWords)
+ * 3. Match transcription against contacts (ContactMatcher)
  * 4. Match found → initiate outgoing call
- * 5. No match → beep, "try again" at 3/6/9 attempts, hangup at 12
+ * 5. No match → beep, "try again" at intervals, hangup at max
  */
 class DirectDialAssistant extends BaseAssistant {
-  private contacts: any;
-  private noMatchCount: number = 0;
+  private contactMatcher: InstanceType<typeof ContactMatcher>;
+  private retryManager: InstanceType<typeof RetryManager>;
 
   constructor(client: any, sessionId: string, contacts?: any) {
     super(directDialConfig, client, sessionId);
-    this.contacts = contacts;
+    this.contactMatcher = new ContactMatcher(contacts);
+    this.retryManager = new RetryManager({
+      maxRetries: (directDialConfig.behavior as any).maxNoMatches || 12,
+      onMaxReached: () => {
+        console.log(`[DirectDial][Session ${this.sessionId}] Max no-matches reached, hanging up`);
+        this.hangup();
+      },
+      feedbackIntervals: [3, 6, 9],
+      onFeedback: () => {
+        this.playAudioNoWait(this.config.prompts.tryAgain);
+      },
+    });
   }
 
   async onCallStart(channel: any, callerId: string, extension: string): Promise<void> {
@@ -55,19 +68,12 @@ class DirectDialAssistant extends BaseAssistant {
 
     console.log(`[DirectDial][Session ${this.sessionId}] Transcription (${isFinal ? "FINAL" : "interim"}): "${text}"`);
 
-    const foundNumber = this.findNumberByWords(text);
+    const foundNumber = this.contactMatcher.findNumberByWords(text);
     console.log(`[DirectDial][Session ${this.sessionId}] Found number: ${foundNumber}`);
 
     if (foundNumber === "no-match") {
-      this.noMatchCount++;
       this.playAudioNoWait("beep");
-
-      if (this.noMatchCount === 3 || this.noMatchCount === 6 || this.noMatchCount === 9) {
-        this.playAudioNoWait(this.config.prompts.tryAgain);
-      } else if (this.noMatchCount >= 12) {
-        console.log(`[DirectDial][Session ${this.sessionId}] No match 12 times, hanging up`);
-        await this.hangup();
-      }
+      this.retryManager.attempt();
     } else {
       console.log(`[DirectDial][Session ${this.sessionId}] Contact matched: ${foundNumber}`);
       this.setState("transferring" as AssistantState);
@@ -80,41 +86,8 @@ class DirectDialAssistant extends BaseAssistant {
   }
 
   async onCallEnd(channel: any): Promise<void> {
-    console.log(`[DirectDial][Session ${this.sessionId}] Call ended. No-match count: ${this.noMatchCount}`);
+    console.log(`[DirectDial][Session ${this.sessionId}] Call ended. Retries: ${this.retryManager.getCount()}`);
     this.setState("idle" as AssistantState);
-  }
-
-  /**
-   * Finds a phone number based on matching words in a given text.
-   */
-  private findNumberByWords(searchWords: string): string {
-    if (!this.contacts || !this.contacts.contacts) return "no-match";
-
-    let foundNumber = "no-match";
-    const searchWordList = searchWords
-      .toLowerCase()
-      .split(" ")
-      .filter((word: string) => word !== "");
-    const cleanedSearchWordList = searchWordList.map((word: string) =>
-      word.split(".").join("")
-    );
-
-    for (const contact of this.contacts.contacts) {
-      const { phone, words } = contact;
-
-      const matchFound = words.some((contactWord: string) => {
-        return cleanedSearchWordList.find(
-          (word: string) => word === contactWord.toLowerCase()
-        );
-      });
-
-      if (matchFound) {
-        foundNumber = phone;
-        break;
-      }
-    }
-
-    return foundNumber;
   }
 }
 

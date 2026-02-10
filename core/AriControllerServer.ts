@@ -247,12 +247,12 @@ class AriControllerServer extends EventEmitter {
     await this.createExternalMediaChannelForSession(sessionId);
 
     // Create assistant for this session
-    // Auto-select: use direct-dial if DEFAULT_ASSISTANT not set and 3CX not configured
+    // Auto-select: use direct-dial if DEFAULT_ASSISTANT not set and transfer destination not configured
     let assistantType = process.env.DEFAULT_ASSISTANT;
     if (!assistantType) {
-      const has3CX = process.env.RING_GROUP_3CX && process.env.TRUNK_3CX;
-      assistantType = has3CX ? "ivr-transfer" : "direct-dial";
-      console.log(`[Session ${sessionId}] Auto-selected assistant: ${assistantType} (3CX ${has3CX ? "configured" : "not configured"})`);
+      const hasTransferDest = process.env.TRANSFER_DESTINATION && process.env.TRANSFER_TRUNK;
+      assistantType = hasTransferDest ? "ivr-transfer" : "direct-dial";
+      console.log(`[Session ${sessionId}] Auto-selected assistant: ${assistantType} (transfer destination ${hasTransferDest ? "configured" : "not configured"})`);
     }
 
     const assistant = AssistantFactory.createByType(
@@ -307,21 +307,21 @@ class AriControllerServer extends EventEmitter {
   setupAssistantEventHandlers(session: CallSessionData, assistant: any, channel: any) {
     const sessionId = session.id;
 
-    // Handle transfer to 3CX Ring Group
-    assistant.on("transferTo3CX", async (data: { sessionId: string; callerName: string }) => {
-      console.log(`[Session ${sessionId}] Assistant requested 3CX transfer for "${data.callerName}"`);
+    // Handle transfer to configured destination (extension, ring group, external SIP endpoint)
+    assistant.on("transferToDestination", async (data: { sessionId: string; callerName: string }) => {
+      console.log(`[Session ${sessionId}] Assistant requested transfer for "${data.callerName}"`);
 
-      const ringGroup = process.env.RING_GROUP_3CX;
-      const trunkName = process.env.TRUNK_3CX;
+      const destination = process.env.TRANSFER_DESTINATION;
+      const trunkName = process.env.TRANSFER_TRUNK;
 
-      if (!ringGroup || !trunkName) {
-        console.error(`[Session ${sessionId}] 3CX not configured (RING_GROUP_3CX / TRUNK_3CX missing)`);
+      if (!destination || !trunkName) {
+        console.error(`[Session ${sessionId}] Transfer not configured (TRANSFER_DESTINATION / TRANSFER_TRUNK missing)`);
         this.playAudio(channel, "beep");
         return;
       }
 
-      // Transfer to 3CX Ring Group
-      await this.transferTo3CX(session, channel, ringGroup, trunkName, data.callerName);
+      // Transfer to configured destination
+      await this.transferToDestination(session, channel, destination, trunkName, data.callerName);
     });
 
     // Handle contact match (direct dialing)
@@ -341,22 +341,19 @@ class AriControllerServer extends EventEmitter {
   }
 
   /**
-   * Transfer a call to a 3CX Ring Group via SIP trunk
+   * Transfer a call to a configured destination via SIP trunk
+   * Destination can be: FreePBX extension, ring group, queue, or external SIP endpoint
    */
-  async transferTo3CX(
+  async transferToDestination(
     session: CallSessionData,
     channel: any,
-    ringGroup: string,
+    destination: string,
     trunkName: string,
     callerName: string
   ): Promise<void> {
-    console.log(`[Session ${session.id}] Transferring to 3CX Ring Group ${ringGroup} via ${trunkName}`);
+    console.log(`[Session ${session.id}] Transferring to ${destination} via ${trunkName}`);
 
-    // Option 1: Use custom dialplan context
-    // const endpoint = `Local/${ringGroup}@to-3cx`;
-
-    // Option 2: Direct PJSIP endpoint
-    const endpoint = `PJSIP/${ringGroup}@${trunkName}`;
+    const endpoint = `PJSIP/${destination}@${trunkName}`;
 
     const fromNumber = channel.caller?.number || process.env.FROM_NUMBER || "unknown";
     const appName = process.env.STASIS_APP_NAME || "stasis-app";
@@ -377,19 +374,18 @@ class AriControllerServer extends EventEmitter {
         outgoingChannelParams,
         (err: any, outgoingChannel: any) => {
           if (err) {
-            console.error(`[Session ${session.id}] 3CX transfer failed:`, err);
+            console.error(`[Session ${session.id}] Transfer to ${destination} failed:`, err);
             this.playAudio(channel, "beep");
             return;
           }
 
-          console.log(`[Session ${session.id}] 3CX outgoing channel: ${outgoingChannel.id}`);
+          console.log(`[Session ${session.id}] Outgoing channel to ${destination}: ${outgoingChannel.id}`);
 
           outgoingChannel.on("StasisStart", (event: any, outChannel: any) => {
             this.sessionManager.setOutgoingChannel(session.id, outChannel);
 
-            // Bridge caller to 3CX Ring Group immediately
             this.addChannelToBridge(outChannel, session.bridge);
-            console.log(`[Session ${session.id}] ✅ Bridged to 3CX Ring Group ${ringGroup}`);
+            console.log(`[Session ${session.id}] Bridged to ${destination}`);
           });
 
           const callStartTime = moment().format("YYYY-MM-DD HH:mm:ss");
@@ -397,12 +393,12 @@ class AriControllerServer extends EventEmitter {
           outgoingChannel.on("StasisEnd", (event: any) => {
             const callEndTime = moment().format("YYYY-MM-DD HH:mm:ss");
             const date = new Date().toISOString().split("T")[0];
-            this.registerOutgoingCallUsage(fromNumber, ringGroup, callStartTime, callEndTime, date);
+            this.registerOutgoingCallUsage(fromNumber, destination, callStartTime, callEndTime, date);
           });
         }
       );
     } catch (error) {
-      console.error(`[Session ${session.id}] Error during 3CX transfer:`, error);
+      console.error(`[Session ${session.id}] Error during transfer to ${destination}:`, error);
     }
   }
 
@@ -650,6 +646,10 @@ class AriControllerServer extends EventEmitter {
       .catch((error) => {
         console.error("Error:", error);
       });
+  }
+
+  getClient(): any {
+    return this.client;
   }
 
   async close() {

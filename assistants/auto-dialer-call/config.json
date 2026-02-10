@@ -1,0 +1,16 @@
+{
+  "name": "AutoDialerCallAssistant",
+  "language": "en-US",
+  "prompts": {
+    "welcome": "custom/autodialer_welcome",
+    "goodbye": "custom/goodbye",
+    "error": "custom/error",
+    "timeout": "custom/timeout"
+  },
+  "behavior": {
+    "maxRetries": 2,
+    "timeoutSeconds": 15,
+    "silenceThresholdSeconds": 5,
+    "transferDigit": "1"
+  }
+}

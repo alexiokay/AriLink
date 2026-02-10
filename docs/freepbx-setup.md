@@ -294,8 +294,8 @@ If you get error with line 1174, this is often related to date/time synchronizat
 
 <img src="https://cdn-icons-png.flaticon.com/512/2885/2885417.png" alt="API" width="50" align="right"/>
 
-> **📖 For detailed ARI + 3CX + Dialplan configuration, see [FREEPBX-ARI-CONFIGURATION.md](FREEPBX-ARI-CONFIGURATION.md)**
-> That guide covers config file method, custom dialplan, 3CX trunk setup, NAT, and firewall.
+> **📖 For detailed ARI + Dialplan configuration, see [FREEPBX-ARI-CONFIGURATION.md](FREEPBX-ARI-CONFIGURATION.md)**
+> That guide covers config file method, custom dialplan, SIP trunk setup, NAT, and firewall.
 
 <details open>
 <summary><b>ARI Configuration Steps (GUI Method)</b></summary>
@@ -348,8 +348,8 @@ The default configuration uses Google Speech API, but you can consider these alt
 
 <img src="https://cdn-icons-png.flaticon.com/512/5778/5778578.png" alt="SIP" width="50" align="right"/>
 
-> **📖 For 3CX-specific trunk setup, see [FREEPBX-ARI-CONFIGURATION.md](FREEPBX-ARI-CONFIGURATION.md#3%EF%B8%8F%E2%83%A3-create-sip-trunk-to-3cx)** (local and cloud-hosted)
-> **📖 For 3CX integration details, see [3CX-INTEGRATION.md](3CX-INTEGRATION.md)**
+> **📖 For SIP trunk setup, see [FREEPBX-ARI-CONFIGURATION.md](FREEPBX-ARI-CONFIGURATION.md#3%EF%B8%8F%E2%83%A3-create-sip-trunk-optional)**
+> **📖 For 3CX-specific integration, see [3CX-INTEGRATION.md](3CX-INTEGRATION.md)**
 
 <details open>
 <summary><b>Setting up SIP Trunks (General)</b></summary>
@@ -404,6 +404,8 @@ Audio files used in your ARI code must be uploaded to the FreePBX server filesys
 ```bash
 /var/lib/asterisk/sounds/custom/
 ```
+
+u can use winSCP to upload files login as root
 
 ### 📋 File Requirements:
 

@@ -1,4 +1,6 @@
 const { BaseAssistant } = require("../base/BaseAssistant");
+const { ContactMatcher } = require("../../tools/ContactMatcher");
+const { RetryManager } = require("../../tools/RetryManager");
 
 import type { AssistantConfig, AssistantState } from "../base/AssistantTypes";
 
@@ -7,27 +9,34 @@ const ivrConfig: AssistantConfig = require("./config.json");
 /**
  * IVR Transfer Assistant
  *
- * Implements the client's call flow:
+ * Call flow:
  * 1. Play welcome prompt: "Welcome. Press 1."
  * 2. Wait for DTMF "1"
  * 3. Play: "Speak your name."
- * 4. Capture transcription → IMMEDIATELY transfer to 3CX Ring Group
+ * 4. Capture transcription → IMMEDIATELY transfer to configured destination
  *
  * States:
  * - idle: No active call
  * - listening: Waiting for DTMF input (Press 1)
  * - processing: Waiting for voice input (name)
- * - transferring: Connecting to 3CX
+ * - transferring: Connecting to destination
  */
 class IvrTransferAssistant extends BaseAssistant {
   private callerName: string = "";
   private transferInitiated: boolean = false;
-  private retryCount: number = 0;
-  private contacts: any;
+  private contactMatcher: InstanceType<typeof ContactMatcher>;
+  private retryManager: InstanceType<typeof RetryManager>;
 
   constructor(client: any, sessionId: string, contacts?: any) {
     super(ivrConfig, client, sessionId);
-    this.contacts = contacts;
+    this.contactMatcher = new ContactMatcher(contacts);
+    this.retryManager = new RetryManager({
+      maxRetries: this.config.behavior.maxRetries || 3,
+      onMaxReached: () => {
+        console.log(`[IvrTransfer][Session ${this.sessionId}] Max retries reached, hanging up`);
+        this.hangup();
+      },
+    });
   }
 
   async onCallStart(channel: any, callerId: string, extension: string): Promise<void> {
@@ -70,14 +79,9 @@ class IvrTransferAssistant extends BaseAssistant {
       this.playAudioNoWait("beep");
 
     } else if (this.state === "listening") {
-      // Wrong key pressed, repeat welcome
-      this.retryCount++;
-      if (this.retryCount < this.config.behavior.maxRetries) {
-        this.playAudioNoWait("beep");
-      } else {
-        console.log(`[IvrTransfer][Session ${this.sessionId}] Max retries reached, hanging up`);
-        await this.hangup();
-      }
+      // Wrong key pressed
+      this.playAudioNoWait("beep");
+      this.retryManager.attempt();
     }
   }
 
@@ -97,23 +101,21 @@ class IvrTransferAssistant extends BaseAssistant {
 
       console.log(`[IvrTransfer][Session ${this.sessionId}] Name captured: "${this.callerName}" → Initiating transfer`);
 
-      // Try contact matching first, fall back to 3CX transfer
-      if (this.contacts) {
-        const matchedNumber = this.findNumberByWords(text);
-        if (matchedNumber !== "no-match") {
-          console.log(`[IvrTransfer][Session ${this.sessionId}] Contact matched: ${matchedNumber}`);
-          this.emit("contactMatched", {
-            sessionId: this.sessionId,
-            name: this.callerName,
-            number: matchedNumber,
-          });
-          this.setState("transferring" as AssistantState);
-          return;
-        }
+      // Try contact matching first, fall back to destination transfer
+      const matchedNumber = this.contactMatcher.findNumberByWords(text);
+      if (matchedNumber !== "no-match") {
+        console.log(`[IvrTransfer][Session ${this.sessionId}] Contact matched: ${matchedNumber}`);
+        this.emit("contactMatched", {
+          sessionId: this.sessionId,
+          name: this.callerName,
+          number: matchedNumber,
+        });
+        this.setState("transferring" as AssistantState);
+        return;
       }
 
-      // No contact match → transfer to 3CX Ring Group
-      this.emit("transferTo3CX", {
+      // No contact match → transfer to configured destination
+      this.emit("transferToDestination", {
         sessionId: this.sessionId,
         callerName: this.callerName,
       });
@@ -125,39 +127,6 @@ class IvrTransferAssistant extends BaseAssistant {
   async onCallEnd(channel: any): Promise<void> {
     console.log(`[IvrTransfer][Session ${this.sessionId}] Call ended. Caller name: "${this.callerName}"`);
     this.setState("idle" as AssistantState);
-  }
-
-  /**
-   * Finds a phone number based on matching words in a given text.
-   */
-  private findNumberByWords(searchWords: string): string {
-    if (!this.contacts || !this.contacts.contacts) return "no-match";
-
-    let foundNumber = "no-match";
-    const searchWordList = searchWords
-      .toLowerCase()
-      .split(" ")
-      .filter((word: string) => word !== "");
-    const cleanedSearchWordList = searchWordList.map((word: string) =>
-      word.split(".").join("")
-    );
-
-    for (const contact of this.contacts.contacts) {
-      const { phone, words } = contact;
-
-      const matchFound = words.some((contactWord: string) => {
-        return cleanedSearchWordList.find(
-          (word: string) => word === contactWord.toLowerCase()
-        );
-      });
-
-      if (matchFound) {
-        foundNumber = phone;
-        break;
-      }
-    }
-
-    return foundNumber;
   }
 }
 

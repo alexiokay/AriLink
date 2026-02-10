@@ -10,8 +10,9 @@ import type { IAssistant } from "../assistants/base/AssistantTypes";
  * to createByType() with a require() pointing to its folder.
  *
  * Available assistants:
- * - "ivr-transfer": IVR flow (Press 1 → Speak name → Transfer to 3CX)
- * - "direct-dial": Voice → Contact match → Direct dial (original flow)
+ * - "ivr-transfer": IVR flow (Press 1 → Speak name → Transfer to destination)
+ * - "direct-dial": Voice → Contact match → Direct dial
+ * - "auto-dialer-call": Outbound auto-dialer (Play message → DTMF → Transfer)
  */
 
 // Registry of assistant constructors (populated on first use via lazy loading)
@@ -25,6 +26,9 @@ function getAssistantClass(type: string): any {
         break;
       case "direct-dial":
         assistantRegistry[type] = require("../assistants/direct-dial/DirectDialAssistant").DirectDialAssistant;
+        break;
+      case "auto-dialer-call":
+        assistantRegistry[type] = require("../assistants/auto-dialer-call/AutoDialerCallAssistant").AutoDialerCallAssistant;
         break;
       default:
         // Fall back to ivr-transfer

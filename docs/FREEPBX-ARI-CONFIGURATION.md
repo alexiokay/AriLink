@@ -1,6 +1,6 @@
 # FreePBX Configuration for AriLink
 
-Configure an **existing FreePBX installation** to work with AriLink and 3CX integration.
+Configure an **existing FreePBX installation** to work with AriLink.
 
 > **📦 Need to install FreePBX first?** See [freepbx-setup.md](./freepbx-setup.md) for VM setup and FreePBX installation.
 >
@@ -144,9 +144,11 @@ You should see:
 
 ---
 
-## 3️⃣ Create SIP Trunk to 3CX
+## 3️⃣ Create SIP Trunk (Optional)
 
-> **📖 See [3CX-INTEGRATION.md](./3CX-INTEGRATION.md) for complete trunk setup** - covers both Asterisk-side and 3CX-side configuration, including local and cloud-hosted 3CX, custom dialplan context, and outbound routes.
+Configure a SIP trunk if you need to transfer calls to an external system (e.g., 3CX, another PBX, or SIP provider).
+
+> **📖 For 3CX-specific trunk setup**, see [3CX-INTEGRATION.md](./3CX-INTEGRATION.md).
 
 ---
 
@@ -190,9 +192,11 @@ asterisk -rx "http reload"
 
 ---
 
-## 6️⃣ Configure 3CX Side
+## 6️⃣ Configure Transfer Destination (Optional)
 
-> **📖 See [3CX-INTEGRATION.md](./3CX-INTEGRATION.md#part-1-configure-3cx-side)** for 3CX-side configuration including trunk setup, inbound rules, and cloud-hosted return trunk.
+If using an external system (3CX, another PBX) as transfer destination:
+
+> **📖 For 3CX setup**, see [3CX-INTEGRATION.md](./3CX-INTEGRATION.md#part-1-configure-3cx-side).
 
 ---
 
@@ -240,13 +244,13 @@ asterisk -rx "dialplan show stasis-app"
 
 Expected: Should show your `[stasis-app]` context with 3 steps
 
-### Test 3CX Trunk:
+### Test SIP Trunk (if configured):
 
 ```bash
 asterisk -rx "pjsip show endpoints"
 ```
 
-Look for `3cx-trunk` in the list
+Look for your trunk name in the list
 
 ---
 
@@ -280,7 +284,8 @@ WSS_PORT=3044
 TRANSCRIPTION_SERVICES=ws://localhost:5000
 ```
 
-> **🔗 For 3CX environment variables** (`RING_GROUP_3CX`, `TRUNK_3CX`,), see [3CX-INTEGRATION.md](./3CX-INTEGRATION.md#update-environment-variables).
+> **🔗 For transfer destination setup** (`TRANSFER_DESTINATION`, `TRANSFER_TRUNK`), see [.env.example](../.env.example).
+> **🔗 For 3CX-specific setup**, see [3CX-INTEGRATION.md](./3CX-INTEGRATION.md).
 
 ---
 
@@ -295,7 +300,7 @@ Before starting your Node.js server, verify:
 - [ ] Firewall allows SIP (5060/UDP) and RTP (10000-20000/UDP)
 - [ ] HTTP server enabled (port 8088)
 - [ ] `.env` file updated with all credentials
-- [ ] 3CX trunk configured (see [3CX-INTEGRATION.md](./3CX-INTEGRATION.md#-pre-launch-checklist))
+- [ ] Transfer destination configured (if needed) - see `.env.example`
 
 ---
 
@@ -328,8 +333,9 @@ WebSocket connection to AriTranscriber server established
 - Check HTTP server: `asterisk -rx "http show status"`
 - Verify credentials in `.env` match `/etc/asterisk/ari.conf`
 
-### "3CX trunk not connecting"
-- See [3CX-INTEGRATION.md Troubleshooting](./3CX-INTEGRATION.md#%EF%B8%8F-common-issues--solutions) for detailed 3CX trunk troubleshooting
+### "SIP trunk not connecting"
+- Check trunk credentials and IP addresses
+- For 3CX-specific issues, see [3CX-INTEGRATION.md Troubleshooting](./3CX-INTEGRATION.md#%EF%B8%8F-common-issues--solutions)
 
 ### "No audio during call"
 - Check RTP ports: `10000-20000/UDP` open

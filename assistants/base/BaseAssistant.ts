@@ -11,9 +11,25 @@ abstract class BaseAssistant extends EventEmitter implements IAssistant {
 
   constructor(config: AssistantConfig, client: any, sessionId: string) {
     super();
+    this.validateConfig(config);
     this.config = config;
     this.client = client;
     this.sessionId = sessionId;
+  }
+
+  private validateConfig(config: AssistantConfig): void {
+    if (!config.name) {
+      throw new Error("Assistant config missing 'name'");
+    }
+    if (!config.prompts || typeof config.prompts !== "object") {
+      throw new Error(`[${config.name}] Config missing 'prompts' object`);
+    }
+    if (!config.prompts.welcome) {
+      console.warn(`[${config.name}] Config missing 'prompts.welcome' - fallback audio will be used`);
+    }
+    if (!config.behavior || typeof config.behavior !== "object") {
+      throw new Error(`[${config.name}] Config missing 'behavior' object`);
+    }
   }
 
   async playAudio(audioFile: string): Promise<void> {
