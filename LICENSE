@@ -1,27 +1,34 @@
-Non-Commercial License (MIT-Based)
+Non-Commercial Software License
 
-Copyright (c) 2023 AriLink Contributors
+Copyright (c) 2022-2026 AriLink Contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to use,
-copy and modify purposes only,
-subject to the following conditions:
+copy, and modify the Software for non-commercial purposes only, subject to the
+following conditions:
 
-1. Non-Commercial Use
+1. Non-Commercial Use Only
 The Software may not be used, distributed, sublicensed, or sold for any
 commercial purpose without prior written permission from the copyright holder.
+"Commercial purpose" includes any use intended for or directed toward
+commercial advantage or monetary compensation.
 
-2. Commercial Use
-Any commercial use of the Software requires explicit permission.
+2. Commercial Licensing
+Any commercial use of the Software requires a separate commercial license.
 To obtain a commercial license, please contact:
 
 Discord: alexispace
 
-3. Attribution
+3. No Redistribution
+You may not redistribute, publish, or make the Software publicly available
+without prior written permission from the copyright holder. Forks and
+derivative works are permitted for personal and educational use only.
+
+4. Attribution
 The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
 
-4. Disclaimer
+5. Disclaimer
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
