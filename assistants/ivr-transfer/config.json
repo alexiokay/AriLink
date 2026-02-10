@@ -14,5 +14,9 @@
     "maxRetries": 3,
     "timeoutSeconds": 30,
     "silenceThresholdSeconds": 5
+  },
+  "transfer": {
+    "destination": "",
+    "trunk": ""
   }
 }

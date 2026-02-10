@@ -12,5 +12,13 @@
     "timeoutSeconds": 15,
     "silenceThresholdSeconds": 5,
     "transferDigit": "1"
+  },
+  "transfer": {
+    "destination": "",
+    "trunk": ""
+  },
+  "campaign": {
+    "maxConcurrent": 1,
+    "trunk": ""
   }
 }

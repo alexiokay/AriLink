@@ -20,6 +20,15 @@ export interface AssistantConfig {
     maxRetries: number;
     timeoutSeconds: number;
     silenceThresholdSeconds: number;
+    [key: string]: any;
+  };
+  transfer?: {
+    destination: string;
+    trunk: string;
+  };
+  campaign?: {
+    maxConcurrent: number;
+    trunk: string;
   };
 }
 
@@ -40,6 +49,9 @@ export interface IAssistant {
   // State management
   getState(): AssistantState;
   setState(state: AssistantState): void;
+
+  // Config access
+  getConfig(): AssistantConfig;
 
   // Cleanup
   destroy(): void;

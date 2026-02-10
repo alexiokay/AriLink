@@ -308,14 +308,16 @@ class AriControllerServer extends EventEmitter {
     const sessionId = session.id;
 
     // Handle transfer to configured destination (extension, ring group, external SIP endpoint)
+    // Priority: assistant config.json > .env vars
     assistant.on("transferToDestination", async (data: { sessionId: string; callerName: string }) => {
       console.log(`[Session ${sessionId}] Assistant requested transfer for "${data.callerName}"`);
 
-      const destination = process.env.TRANSFER_DESTINATION;
-      const trunkName = process.env.TRANSFER_TRUNK;
+      const config = assistant.getConfig();
+      const destination = config.transfer?.destination || process.env.TRANSFER_DESTINATION;
+      const trunkName = config.transfer?.trunk || process.env.TRANSFER_TRUNK;
 
       if (!destination || !trunkName) {
-        console.error(`[Session ${sessionId}] Transfer not configured (TRANSFER_DESTINATION / TRANSFER_TRUNK missing)`);
+        console.error(`[Session ${sessionId}] Transfer not configured (set transfer in config.json or TRANSFER_DESTINATION/TRANSFER_TRUNK in .env)`);
         this.playAudio(channel, "beep");
         return;
       }

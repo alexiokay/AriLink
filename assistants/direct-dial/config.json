@@ -5,9 +5,13 @@
     "welcome": "custom/welcome_2",
     "tryAgain": "custom/try_again",
     "goodbye": "custom/goodbye",
-    "error": "custom/error"
+    "error": "custom/error",
+    "timeout": "custom/timeout"
   },
   "behavior": {
+    "maxRetries": 12,
+    "timeoutSeconds": 30,
+    "silenceThresholdSeconds": 5,
     "maxNoMatches": 12,
     "tryAgainInterval": 3
   }

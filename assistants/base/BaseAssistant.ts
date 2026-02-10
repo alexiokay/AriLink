@@ -99,6 +99,10 @@ abstract class BaseAssistant extends EventEmitter implements IAssistant {
     }
   }
 
+  getConfig(): AssistantConfig {
+    return this.config;
+  }
+
   getState(): AssistantState {
     return this.state as AssistantState;
   }

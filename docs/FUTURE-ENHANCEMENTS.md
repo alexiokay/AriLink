@@ -8,7 +8,7 @@ This document tracks potential features and improvements for AriLink.
 
 ### Status
 - **Priority:** HIGH
-- **Implementation:** Not started
+- **Implementation:** DONE ✅
 - **Complexity:** Low-Medium
 
 ### Overview
@@ -16,24 +16,26 @@ Outbound auto-dialer that calls numbers from a list, plays a message, and transf
 
 ### Flow
 ```
-Read phone list (CSV/JSON) → Originate call → Play message → Wait for DTMF "1" → Transfer to destination → Log result → Next number
+Read phone list (JSON) → Originate call → Play message → Wait for DTMF "1" → Transfer to destination → Log result → Next number
 ```
 
-### Features
-- Upload phone number list (CSV/JSON)
-- Configurable concurrent calls (respect SIP trunk limits)
-- Pre-recorded message playback
-- DTMF detection for call routing
-- Transfer to configurable destination (FreePBX extension, ring group, queue, or external SIP endpoint)
-- Call result logging (answered, busy, no answer, failed, transferred)
-- Pause/resume campaign
-- Retry logic for busy/no-answer
+### Implemented Features
+- ✅ Phone number list from JSON file
+- ✅ Configurable concurrent calls (respect SIP trunk limits)
+- ✅ Pre-recorded message playback
+- ✅ DTMF detection for call routing (configurable transfer digit)
+- ✅ Transfer to configurable destination (via `config.json` or env vars)
+- ✅ Call result logging (answered, busy, no answer, failed, transferred)
+- ✅ Campaign result persistence (`campaign-results/campaign-{timestamp}.json`)
+- ✅ Pause/resume/stop campaign
+- ✅ CLI launch: `npm run start:autodialer` or `npm start -- --assistant auto-dialer --phone-list path/to/list.json`
 
-### Implementation
-- New assistant: `assistants/auto-dialer/AutoDialerAssistant.ts`
-- Uses existing `channel.originate()` from ARI
-- Config: phone list path, audio file, transfer destination, max concurrent calls
-- No transcription needed
+### Architecture
+- Campaign engine: `core/AutoDialer.ts`
+- Per-call assistant: `assistants/auto-dialer-call/AutoDialerCallAssistant.ts`
+- Config: `assistants/auto-dialer-call/config.json` (transfer destination, trunk, max concurrent, prompts)
+- Example phone list: `tools/phone-list.example.json`
+- Uses shared utilities: `InactivityTimer` for DTMF wait timeout
 
 ---
 
@@ -201,7 +203,7 @@ Web-based dashboard for monitoring and management. Only build features FreePBX c
 
 | Feature | Priority | Complexity | Effort | Dependencies |
 |---------|----------|------------|--------|--------------|
-| **Auto-Dialer Assistant** | HIGH | Low-Medium | 3-5 days | None |
+| **Auto-Dialer Assistant** | ~~HIGH~~ | ~~Low-Medium~~ | ~~3-5 days~~ | DONE ✅ |
 | **Docker Deployment** | Medium | Medium | 2-3 days | None |
 | **Database Integration** | Medium | Medium | 1 week | None |
 | **Web UI Dashboard** | Medium | High | 3-4 weeks | Database |
@@ -223,13 +225,19 @@ Web-based dashboard for monitoring and management. Only build features FreePBX c
 - ✅ 3CX integration documentation
 - ✅ DTMF handling + bridge management
 
-### Phase 2: Auto-Dialer (Next)
-- Auto-dialer assistant
-- Campaign management (phone lists, start/stop)
-- Call result logging
-- Docker deployment for VPS
+### Phase 2: Auto-Dialer & Architecture (DONE)
+- ✅ Auto-dialer campaign engine (`core/AutoDialer.ts`)
+- ✅ Auto-dialer per-call assistant (`AutoDialerCallAssistant`)
+- ✅ Campaign result persistence (JSON files)
+- ✅ Shared utilities extracted: `ContactMatcher`, `InactivityTimer`, `RetryManager`
+- ✅ Per-assistant `config.json` (transfer destination, trunk, campaign settings)
+- ✅ Config hierarchy: `config.json > .env > defaults`
+- ✅ CLI args: `--assistant`, `--phone-list`
+- ✅ npm convenience scripts: `start:ivr`, `start:dial`, `start:autodialer`
+- ✅ Config validation in BaseAssistant constructor
 
-### Phase 3: Production Ready
+### Phase 3: Production Ready (Next)
+- Docker deployment for VPS
 - Database integration
 - Security & authentication
 - Call recording
@@ -240,6 +248,62 @@ Web-based dashboard for monitoring and management. Only build features FreePBX c
 - Sound file management GUI
 - Analytics & reporting
 - CRM integrations
+
+---
+
+## 🦀 Language Migration Research: Rust vs TypeScript ARI
+
+### Summary (Researched 2026-02-10)
+
+**Should we migrate from TypeScript `ari-client` to Rust?** Worth considering. The JS library is effectively unmaintained while Rust alternatives are actively developed.
+
+### Current JS `ari-client` Status
+
+- **Version:** 2.2.0 — **last published ~6 years ago (2020)**
+- GitHub issue #132: "status of node-ari-client" — not officially abandoned but effectively stale
+- Described as "best effort with limited support" by Asterisk/Sangoma
+- Works but has deprecated dependencies and callback-style API
+- No TypeScript types (community `@types/ari-client` exists separately)
+
+### Rust ARI Libraries
+
+| Library | Version | Updated | Stars | Coverage |
+|---------|---------|---------|-------|----------|
+| **asterisk-ari** (jBernavaPrah) | v0.3.0 | Mar 2025 | 4 | Full REST API + WebSocket events. Tokio async. |
+| asterisk-ari-client-rs (jabber-tools) | v0.1.4 | May 2024 | 7 | Partial. Self-described "by no means ready." |
+
+**asterisk-ari v0.3.0** (the promising one):
+- Claims full ARI REST API coverage + WebSocket event streaming
+- Modern stack: tokio, reqwest, tokio-tungstenite, serde
+- Example shows: StasisStart handling, channel.answer(), channel.play(), async/await
+- Dual-licensed Apache 2.0 / MIT
+- Concern: only 679 total downloads, 4 stars — low adoption, production-readiness unproven
+
+### Go Alternative
+
+- **CyCoreSystems/ari** v6 — most mature non-JS option
+- Production-proven, ~150 stars, `ari-proxy` for distributed scaling via NATS
+- Full ARI coverage with proper Go types
+
+### Our ARI Feature Usage
+
+We use: WebSocket connection, Stasis lifecycle, channel answer/hangup/originate, bridge create/addChannel/destroy, audio playback + events, DTMF events, ExternalMedia channels (direct REST).
+
+### Recommended Path
+
+1. **Short-term**: Stay on JS `ari-client` — it works despite being old. Improve our TypeScript types, eliminate `any` usage
+2. **Medium-term**: Monitor `asterisk-ari` Rust crate (jBernavaPrah). If it reaches v1.0 with proven bridge/DTMF/ExternalMedia support, consider migrating the ARI layer to Rust
+3. **High-value Rust target**: RTP audio processing — replace `rtp-udp-server.js` with Rust binary (zero-copy RTP, native VAD, audio format conversion). This is where Rust's performance actually matters
+4. **Alternative**: Go (`CyCoreSystems/ari`) if we need distributed scaling before Rust matures
+
+### Migration Risk Assessment
+
+| Approach | Risk | Reward | When |
+|----------|------|--------|------|
+| Improve TS types | Low | Medium | Now |
+| Rust RTP service | Medium | High | When audio pipeline needs optimization |
+| Rust ARI (asterisk-ari crate) | Medium-High | High | When crate reaches v1.0+ with community adoption |
+| Go ARI (CyCoreSystems) | Medium | Medium | If scaling to 100+ concurrent calls |
 
 ---
 

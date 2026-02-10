@@ -48,9 +48,19 @@ class AutoDialer extends EventEmitter {
   constructor(client: any) {
     super();
     this.client = client;
-    this.maxConcurrent = parseInt(process.env.AUTODIALER_MAX_CONCURRENT || "1", 10);
-    this.audioFile = process.env.AUTODIALER_AUDIO || "custom/autodialer_welcome";
-    this.trunkName = process.env.AUTODIALER_TRUNK || process.env.TRANSFER_TRUNK || "from-internal";
+
+    // Load config from auto-dialer-call assistant config.json, fall back to env vars
+    let assistantConfig: any = {};
+    try {
+      assistantConfig = require("../assistants/auto-dialer-call/config.json");
+    } catch { /* config not found, use env vars */ }
+
+    this.maxConcurrent = assistantConfig.campaign?.maxConcurrent
+      || parseInt(process.env.AUTODIALER_MAX_CONCURRENT || "1", 10);
+    this.audioFile = assistantConfig.prompts?.welcome
+      || process.env.AUTODIALER_AUDIO || "custom/autodialer_welcome";
+    this.trunkName = assistantConfig.campaign?.trunk
+      || process.env.AUTODIALER_TRUNK || process.env.TRANSFER_TRUNK || "from-internal";
     this.callerId = process.env.FROM_NUMBER || "unknown";
   }
 
@@ -243,12 +253,14 @@ class AutoDialer extends EventEmitter {
         sessionManager.setAssistant(sessionId, assistant);
 
         // Listen for transfer events
+        // Priority: assistant config.json > .env vars
         assistant.on("transferToDestination", async (data: any) => {
-          const destination = process.env.TRANSFER_DESTINATION;
-          const trunk = process.env.TRANSFER_TRUNK;
+          const config = assistant.getConfig();
+          const destination = config.transfer?.destination || process.env.TRANSFER_DESTINATION;
+          const trunk = config.transfer?.trunk || process.env.TRANSFER_TRUNK;
 
           if (!destination || !trunk) {
-            console.error(`[AutoDialer][${sessionId}] TRANSFER_DESTINATION/TRANSFER_TRUNK not configured`);
+            console.error(`[AutoDialer][${sessionId}] Transfer not configured (set transfer in config.json or TRANSFER_DESTINATION/TRANSFER_TRUNK in .env)`);
             return;
           }
 

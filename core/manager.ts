@@ -7,6 +7,34 @@ const fs = require("fs");
 const path = require("path");
 require("dotenv").config({ path: path.resolve(__dirname, "../.env"), quiet: true });
 
+//? ---------------- Parse CLI arguments ----------------
+function parseArgs(): { assistant?: string; phoneList?: string } {
+  const args = process.argv.slice(2);
+  const parsed: any = {};
+
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--assistant" && args[i + 1]) {
+      parsed.assistant = args[++i];
+    } else if (args[i] === "--phone-list" && args[i + 1]) {
+      parsed.phoneList = args[++i];
+    }
+  }
+
+  return parsed;
+}
+
+const cliArgs = parseArgs();
+
+// CLI args override env vars
+if (cliArgs.assistant) {
+  process.env.DEFAULT_ASSISTANT = cliArgs.assistant;
+  console.log(`[Manager] Assistant override: ${cliArgs.assistant}`);
+}
+if (cliArgs.phoneList) {
+  process.env.AUTODIALER_PHONE_LIST = cliArgs.phoneList;
+  console.log(`[Manager] Phone list override: ${cliArgs.phoneList}`);
+}
+
 console.log("Hello, world!");
 
 //? ---------------- Convert JSON file to hash map ----------------
