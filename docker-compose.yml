@@ -1,0 +1,74 @@
+services:
+  # ============================================
+  # FreePBX (Asterisk + Web GUI)
+  # ============================================
+  freepbx:
+    image: tiredofit/freepbx:latest
+    container_name: freepbx
+    restart: unless-stopped
+    ports:
+      # Web GUI
+      - "80:80"
+      - "443:443"
+      # ARI (Asterisk REST Interface)
+      - "8088:8088"
+      # SIP
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "5160:5160/udp"
+      - "5160:5160/tcp"
+      # RTP media
+      - "10000-10100:10000-10100/udp"
+      # UCP
+      - "8001:8001"
+    volumes:
+      - freepbx-data:/data
+      - freepbx-db:/var/lib/mysql
+      - freepbx-logs:/var/log
+      # Custom sounds (IVR prompts, hold music)
+      - ./assets/sounds:/var/lib/asterisk/sounds/custom
+    environment:
+      # Database
+      - DB_EMBEDDED=TRUE
+      # HTTP
+      - HTTP_PORT=80
+      - HTTPS_PORT=443
+      # Timezone
+      - TZ=Europe/Brussels
+      # RTP ports (keep small range for Docker)
+      - RTP_START=10000
+      - RTP_FINISH=10100
+    networks:
+      - arilink-net
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+
+  # ============================================
+  # AriLink Server (Node.js)
+  # ============================================
+  arilink:
+    build: .
+    container_name: arilink
+    restart: unless-stopped
+    depends_on:
+      - freepbx
+    ports:
+      - "3011:3011"
+      - "8000:8000/udp"
+    env_file:
+      - .env
+    environment:
+      # Override PBX_IP to point to freepbx container
+      - PBX_IP=freepbx
+    networks:
+      - arilink-net
+
+volumes:
+  freepbx-data:
+  freepbx-db:
+  freepbx-logs:
+
+networks:
+  arilink-net:
+    driver: bridge
