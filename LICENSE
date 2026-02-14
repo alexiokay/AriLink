@@ -1,38 +1,31 @@
-Non-Commercial Software License
+AriLink Community License (ACL) v1.0
+Copyright (c) 2026 Alexi Pawelec
 
-Copyright (c) 2022-2026 AriLink Contributors
+1. Grant of Rights
+You are permitted to:
+- View and study the source code.
+- Modify the software for personal use.
+- Use the software internally within your organization.
+- Use the software for internal commercial operations, provided it is not redistributed or offered to third parties.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to use,
-copy, and modify the Software for non-commercial purposes only, subject to the
-following conditions:
+2. Restrictions
+You may NOT, without explicit written permission from the copyright holder:
+- Redistribute the software in original or modified form.
+- Sell, sublicense, or commercially distribute the software.
+- Offer the software as a hosted or managed service (SaaS).
+- Provide the software to third parties as part of a commercial service.
+- White-label the software.
+- Use the software to build a competing commercial product or platform.
+- Remove or alter copyright or license notices.
 
-1. Non-Commercial Use Only
-The Software may not be used, distributed, sublicensed, or sold for any
-commercial purpose without prior written permission from the copyright holder.
-"Commercial purpose" includes any use intended for or directed toward
-commercial advantage or monetary compensation.
+3. Commercial Hosting and Resale
+Any form of SaaS hosting, third-party deployment, client resale, or revenue-generating redistribution requires a separate commercial agreement with the copyright holder.
 
-2. Commercial Licensing
-Any commercial use of the Software requires a separate commercial license.
-To obtain a commercial license, please contact:
+4. Contributions
+By submitting contributions (pull requests, patches, etc.), you grant the copyright holder a non-exclusive, perpetual right to use, modify, and distribute your contribution under this license.
 
-Discord: alexispace
+5. No Warranty
+The software is provided "as is", without warranty of any kind, express or implied. The copyright holder is not liable for any damages arising from its use.
 
-3. No Redistribution
-You may not redistribute, publish, or make the Software publicly available
-without prior written permission from the copyright holder. Forks and
-derivative works are permitted for personal and educational use only.
-
-4. Attribution
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-5. Disclaimer
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+6. Termination
+Any violation of these terms automatically terminates your rights under this license.
