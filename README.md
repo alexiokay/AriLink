@@ -1,217 +1,269 @@
-# 📞 AriLink
+# AriLink
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8.3-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-23.x-green.svg)](https://nodejs.org/)
+[![Nuxt](https://img.shields.io/badge/Nuxt-4.3-00DC82.svg)](https://nuxt.com/)
 [![Asterisk](https://img.shields.io/badge/Asterisk-ARI-red.svg)](https://wiki.asterisk.org/wiki/display/AST/Asterisk+REST+Interface+(ARI))
 [![License: ACL v1.0](https://img.shields.io/badge/License-ACL--1.0-orange.svg)](LICENSE)
 
 <p align="center">
-  <!-- Replace with your own logo when available -->
-  <img src="./assets/header.webp" alt="AriLink Logo" width="100%" />
+  <img src="./assets/header.webp" alt="AriLink" width="100%" />
   <br>
-  <em><a href="https://asterisk.org"><img src="https://asterisk.org/wp-content/uploads/asterisk-logo.png" alt="Asterisk" width="50" style="vertical-align: middle;"/></a>-powered telephony management with speech recognition and transcription</em>
+  <em><a href="https://asterisk.org"><img src="https://asterisk.org/wp-content/uploads/asterisk-logo.png" alt="Asterisk" width="50" style="vertical-align: middle;"/></a>-powered telephony platform with real-time transcription, campaigns, and a full web dashboard</em>
 </p>
 
 ---
 
-## 📋 Overview
+## Overview
 
-AriLink is a telephony management system built on Asterisk's ARI (Asterisk REST Interface). It provides voice call handling, transcription, and PBX control capabilities. The system combines WebSockets, RTP, and speech-to-text integration to create a modern, feature-rich telephony solution.
+AriLink is a telephony platform built on Asterisk's ARI (Asterisk REST Interface). It combines a **Nuxt 4 web dashboard**, a **Rust RTP audio pipeline**, and **local AI transcription** into a single system for managing calls, running outbound campaigns, and monitoring everything in real time.
 
-## ✨ Key Features
+<p align="center">
+  <img src="./assets/dashboard.png" alt="AriLink Dashboard" width="100%" />
+</p>
 
-- 🔄 **Call Management** - Handles incoming and outgoing calls through Asterisk PBX
-- 🎙️ **Speech-to-Text** - Real-time transcription using local AI models (Parakeet, Whisper) or Google Cloud
-- 🌉 **Bridge Management** - Creates and manages voice bridges for connecting multiple channels
-- 👥 **Contact Recognition** - Supports voice-activated dialing using a contacts database
-- 📡 **External Media Channels** - Supports external media integration for advanced use cases
-- 🔌 **WebSocket Interface** - Provides real-time updates and control via WebSockets
-- 🔁 **Automatic Fallback** - Seamlessly switches to backup transcription services if primary fails
+## Key Features
 
-## 🏗️ Architecture
+- **Web Dashboard** - Full management UI with real-time service status, active calls, logs, and configuration
+- **Call Management** - Incoming and outgoing calls through Asterisk PBX with live transcription
+- **Campaign Engine** - Automated outbound dialing with configurable assistants and call scripts
+- **Speech-to-Text** - Real-time transcription using local AI models (Parakeet TDT, Whisper) or Google Cloud
+- **Pluggable Assistants** - Modular call logic (IVR transfer, direct dial, auto-dialer) with per-assistant configuration
+- **Built-in Softphone** - SIP softphone directly in the dashboard for testing and manual calls
+- **Call History** - SQLite-backed call records with search and transcription playback
+- **SSH Terminal** - Remote PBX management directly from the dashboard
+- **File Manager** - Upload and manage Asterisk audio files (prompts, greetings) via SFTP
+- **Contact Management** - Voice-activated dialing using a contacts database
+- **Automatic Fallback** - Seamlessly switches between transcription providers on failure
 
-The system is built on TypeScript and Node.js with a modular architecture supporting **multiple concurrent calls**:
+<p align="center">
+  <img src="./assets/softphone.png" alt="Built-in Softphone" width="220" />
+</p>
+
+## Architecture
+
+Built on **Nuxt 4 + Nitro** (single server for SPA, API, and Socket.IO), with a **Rust RTP server** for audio and **Python services** for transcription:
 
 ```mermaid
 flowchart TD
-    A[📞 Incoming Call 1] --> B[CallSessionManager]
-    C[📞 Incoming Call 2] --> B
-    B --> D[Session 1: Bridge 1]
-    B --> E[Session 2: Bridge 2]
-    D --> F[External Media 1]
-    E --> G[External Media 2]
-    F --> H[🎙️ Transcriber]
-    G --> H
-    H -->|routed by session ID| D
-    H -->|routed by session ID| E
+    subgraph Dashboard["Nuxt 4 Dashboard"]
+        UI[Vue 3 SPA]
+        API[Nitro API Routes]
+        SIO[Socket.IO]
+    end
+
+    subgraph Engine["Node.js Engine"]
+        CTRL[ARI Controller]
+        CAMP[Campaign Engine]
+        HIST[Call History DB]
+        LOG[Log Collector]
+    end
+
+    subgraph Audio["Rust RTP Server"]
+        RTP[RTP Listener :8000]
+        WS_BRIDGE[WebSocket Bridge]
+    end
+
+    subgraph Transcription["Transcription Services"]
+        PKT[Parakeet TDT 0.6B]
+        WHSP[Whisper]
+        GCS[Google Cloud Speech]
+    end
+
+    PBX[Asterisk PBX] -->|ARI WebSocket| CTRL
+    PBX -->|RTP Audio| RTP
+    RTP --> WS_BRIDGE
+    WS_BRIDGE -->|Audio Stream| PKT
+    WS_BRIDGE -.->|Fallback| WHSP
+    WS_BRIDGE -.->|Fallback| GCS
+    PKT -->|Transcription| WS_BRIDGE
+    WS_BRIDGE -->|Results| CTRL
+    CTRL --> HIST
+    CTRL --> LOG
+    CAMP --> CTRL
+    SIO <-->|Real-time| UI
+    API --> HIST
+    API --> LOG
+    SIO <--> Engine
 ```
 
 ### Core Components
 
 <details>
-<summary><b>🎮 AriControllerServer</b></summary>
-<p>
+<summary><b>Engine</b></summary>
 
-The main controller that interfaces with Asterisk PBX:
+Orchestrates all backend services on startup:
+- Starts the Rust RTP server and Parakeet transcription (in parallel)
+- Connects to Asterisk ARI
+- Wires up the Dashboard, Call History, and Campaign Engine
+- Graceful shutdown of all child processes
+
+</details>
+
+<details>
+<summary><b>ARI Controller</b></summary>
+
+Interfaces with Asterisk PBX via ARI:
 - Manages call flows, bridges, and DTMF input
-- Handles Stasis application events (start, end)
-- Provides WebSocket server for client connections
-- Manages contact lookups for voice-activated dialing
+- Delegates call logic to pluggable assistants
+- Routes transcription results to active calls
+- Handles contact lookups for voice-activated dialing
 
-</p>
 </details>
 
 <details>
-<summary><b>📡 Rust RTP Server</b></summary>
-<p>
+<summary><b>Rust RTP Server</b></summary>
 
-High-performance audio pipeline (replaces legacy Node.js RTP/transcription):
+High-performance audio pipeline:
 - Receives RTP audio from Asterisk ExternalMedia channels
-- Per-session audio routing with codec handling (slin16)
-- Forwards audio to configurable transcription services (Parakeet, Google Cloud Speech)
+- Per-session audio routing with codec handling (slin16, Opus)
+- Forwards audio to transcription services via WebSocket
 - Automatic fallback between transcription providers
-- WebSocket bridge for real-time transcription results
 
-</p>
 </details>
 
 <details>
-<summary><b>🗣️ Transcription Providers</b></summary>
-<p>
+<summary><b>Transcription Providers</b></summary>
 
-Multiple transcription backend support:
-- **Local providers**: Parakeet TDT, Whisper (runs on your GPU)
-- **Cloud provider**: Google Speech-to-Text API (optional)
-- Handles streaming transcription with automatic restarts
-- Manages audio chunking for optimal performance
-- Provides both interim and final transcription results
-- Automatic failover between services
+Multiple backend support with automatic failover:
+- **Parakeet TDT 0.6B-v3** (recommended) - 25 languages, 2000x+ real-time speed, runs on GPU
+- **Whisper** - Slower but highly accurate
+- **Google Cloud Speech** - Cloud-based fallback (requires API credentials)
+- Streaming transcription with interim and final results
+- Priority chain configured via `TRANSCRIPTION_SERVICES` env var
 
-</p>
 </details>
 
-## ⚙️ Configuration
+<details>
+<summary><b>Campaign Engine</b></summary>
 
-The system uses environment variables for configuration, including:
+Automated outbound dialing:
+- Upload phone lists and run campaigns from the dashboard
+- Configurable concurrency, retry logic, and call scripts
+- Real-time campaign progress via Socket.IO
+- Per-call results stored in campaign-results/
 
-| Category | Variables |
-|----------|-----------|
-| PBX | PBX IP address, login credentials |
-| WebSocket | Server ports, external host information |
-| Transcription | Language settings, model configuration |
-| Telephony | Provider settings, phone numbers |
+</details>
 
-## 🚀 Getting Started
+### Dashboard Pages
 
-<img src="https://cdn-icons-png.flaticon.com/512/4961/4961854.png" alt="Setup" width="50" align="right"/>
+| Page | Description |
+|------|-------------|
+| **Dashboard** | Service status (Asterisk, Rust RTP, Transcription), active calls |
+| **Calls** | Call history with transcription, search, and playback |
+| **Assets** | Upload/manage Asterisk audio files via SFTP |
+| **Terminal** | SSH terminal for remote PBX management |
+| **Campaigns** | Create and run outbound call campaigns |
+| **Contacts** | Manage contacts for voice-activated dialing |
+| **Assistants** | Configure call handling logic per assistant |
+| **Logs** | Real-time and historical application logs |
+| **Config** | Edit environment variables and server settings |
+| **Docs** | Built-in documentation viewer |
+
+## Getting Started
 
 ### Prerequisites
 
 1. **Set up FreePBX server**:
-   - 📦 **New installation?** [FreePBX Installation Guide](docs/freepbx-setup.md) - VM setup and FreePBX installation
-   - ⚙️ **Already installed?** [FreePBX ARI Configuration](docs/FREEPBX-ARI-CONFIGURATION.md) - Configure for AriLink
-2. **Install UV** (Python package manager):
+   - New installation? [FreePBX Installation Guide](docs/freepbx-setup.md)
+   - Already installed? [FreePBX ARI Configuration](docs/FREEPBX-ARI-CONFIGURATION.md)
+2. **Node.js 23+** and **npm**
+3. **UV** (Python package manager) for transcription services:
    ```powershell
    # Windows PowerShell
    irm https://astral.sh/uv/install.ps1 | iex
    ```
 
-### Installation & Startup
+### Installation
 
-1. **Clone and Install everything** (One command for all Node dependencies):
+1. **Clone and install dependencies** (one command installs everything):
    ```bash
    npm install
    ```
-   > [!TIP]
-   > This automatically installs both the core server and the interactive dashboard dependencies.
+   > This automatically installs both the core server and dashboard dependencies.
 
-2. **Setup Transcription Service** (Local speech recognition):
-   Choose one and install its dependencies (requires [UV](https://astral.sh/uv/)):
+2. **Set up transcription** (local speech recognition):
    ```bash
-   # For Parakeet (Recommended)
-   cd transcription-services/parakeet-service && uv pip install -r requirements.txt
-   
-   # OR for Whisper
-   cd transcription-services/whisper-service && uv pip install -r requirements.txt
+   cd transcription-services/parakeet-service
+   python -m venv .venv
+   uv pip install -r requirements.txt
    ```
 
-3. **Start the system**:
+3. **Configure environment**:
    ```bash
-   # Terminal 1: AI Service
-   cd transcription-services/parakeet-service && ./start-service.bat
-   
-   # Terminal 2: AriLink (Choose one mode)
-   npm run dev   # Best for development (Live Reload)
-   npm start     # Best for production (Builds & Starts)
+   cp .env.example .env
+   # Edit .env with your FreePBX IP, ARI credentials, etc.
    ```
 
-### ⚙️ Configuration
-The system uses a central `.env` file. You can manage this via the **Config** page in the dashboard once the server is running.
-- See [`.env.example`](.env.example) for manual setup.
-- Configure contacts in `tools/contacts.json` for voice-activated dialing.
+### Running
 
-## 💡 Use Cases
+```bash
+# Development (hot reload, auto-starts Parakeet if configured)
+npm run dev
 
-<div style="display: flex; flex-wrap: wrap; gap: 20px;">
-  <div style="flex: 1; min-width: 250px;">
-    <h3>📞 Voice Call Center</h3>
-    <p>Handle incoming calls with transcription for record-keeping</p>
-  </div>
-  <div style="flex: 1; min-width: 250px;">
-    <h3>🤖 Automated Calling Systems</h3>
-    <p>Set up outbound call campaigns with speech recognition</p>
-  </div>
-  <div style="flex: 1; min-width: 250px;">
-    <h3>🗣️ Voice-Activated Dialing</h3>
-    <p>Allow callers to speak names instead of dialing numbers</p>
-  </div>
-  <div style="flex: 1; min-width: 250px;">
-    <h3>📝 Call Recording with Transcription</h3>
-    <p>Keep searchable records of call content</p>
-  </div>
-</div>
+# Production (builds if needed, then starts)
+npm start
 
-## 📦 Dependencies
+# Build only
+npm run build
+```
 
-- **Asterisk PBX** with ARI enabled
-- **Node.js** and TypeScript
-- **Transcription Service** - choose one:
-  - Local: Parakeet TDT 0.6B (RECOMMENDED) or Whisper
-  - Cloud: Google Cloud Speech API credentials (optional)
-- Various NPM packages including:
-  ```
-  ari-client, @google-cloud/speech, ws, socket.io, dotenv, better-sqlite3
-  ```
+> Set `AUTO_START_TRANSCRIPTION=true` in `.env` to have the launcher automatically start Parakeet in parallel with the server. No separate terminal needed.
 
-## 🔮 Future Improvements
+The dashboard will be available at `http://localhost:3011`. All settings can be managed from the **Config** page once the server is running.
 
-- 🔧 Enhanced typing for TypeScript
-- 🖥️ Web UI for monitoring and management
-- ✅ ~~Additional speech recognition providers~~ **DONE: Local Whisper model integrated!**
-- 🔊 Additional providers: Scribe from ElevenLabs, Azure Speech
-- 📊 Call analytics and reporting features
-- 💾 Database persistence for call records and transcriptions
+### Assistant Modes
 
-## 📜 License
+```bash
+npm run start:ivr        # IVR with transfer (default)
+npm run start:dial       # Direct dial mode
+npm run start:autodialer # Auto-dialer campaign mode
+```
+
+## Configuration
+
+The system uses a central `.env` file. Key settings:
+
+| Category | Variables |
+|----------|-----------|
+| **PBX** | `PBX_IP`, `ASTERISK_LOGIN`, `ASTERISK_PASSWORD` |
+| **Transcription** | `TRANSCRIPTION_SERVICES`, `AUTO_START_TRANSCRIPTION`, `SPEECH_LANG` |
+| **Server** | `PORT` (default 3011), `LISTENER_SERVER`, `EXTERNAL_HOST` |
+| **Assistants** | `DEFAULT_ASSISTANT`, per-assistant `config.json` files |
+
+See [`.env.example`](.env.example) for all options with documentation.
+
+## Tech Stack
+
+- **Frontend**: Nuxt 4, Vue 3.5, @nuxt/ui, Socket.IO client, SIP.js (softphone)
+- **Backend**: Nitro (Node.js), TypeScript, Socket.IO, ari-client, better-sqlite3
+- **Audio**: Rust RTP server (slin16, Opus), Asterisk ExternalMedia
+- **Transcription**: Parakeet TDT 0.6B-v3 (NeMo), Whisper, Google Cloud Speech
+- **Infrastructure**: Asterisk PBX (FreePBX), SSH/SFTP for remote management
+
+## Roadmap
+
+- ~~Web UI for monitoring and management~~ **Done**
+- ~~Database persistence for call records~~ **Done**
+- ~~Additional speech recognition providers~~ **Done**
+- Additional providers: Scribe (ElevenLabs), Azure Speech, Deepgram
+- Call analytics and reporting
+- One-click deployment (Docker, Railway)
+- Transcription management GUI (model downloads, provider config)
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the full roadmap.
+
+## License
 
 This project is licensed under the **AriLink Community License (ACL) v1.0** - see the [LICENSE](LICENSE) file for details.
 
-### Summary
-
-- ✅ **Free for personal & internal use** - View, study, and modify for personal/internal use.
-- 💼 **Commercial use restricted** - Internal commercial operations allowed; no redistribution or SaaS.
-- 🚫 **No Redistribution** - You may not redistribute, white-label, or sell the software.
-- 📧 **Commercial Licensing**: For SaaS hosting, resale, or third-party deployment, contact Alexi Pawelec (Discord: `alexispace`).
-
-**Key Points:**
-- The software is provided "as is" without warranty.
-- Contributions grant the copyright holder perpetual rights to use/modify.
-- Violation of terms automatically terminates the license.
-
-For the full license text, please refer to the [LICENSE](LICENSE) file.
+- **Free for personal & internal use** - View, study, and modify for personal/internal use.
+- **Commercial use restricted** - Internal commercial operations allowed; no redistribution or SaaS.
+- **No Redistribution** - You may not redistribute, white-label, or sell the software.
+- **Commercial Licensing**: For SaaS hosting, resale, or third-party deployment, contact Alexi Pawelec (Discord: `alexispace`).
 
 ---
 
 <div align="center">
-  <p>Built with ❤️ for modern telephony solutions</p>
+  <p>Built with care for modern telephony</p>
 </div>
