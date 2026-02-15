@@ -15,9 +15,10 @@ tools/*.js
 tools/zig-*/
 assistants/**/*.js
 
-# Dashboard build output
+# Dashboard build output & runtime data
 dashboard/.output/
 dashboard/.nuxt/
+dashboard/.data/
 dashboard/node_modules/
 
 # Call history database
