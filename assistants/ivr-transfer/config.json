@@ -1,5 +1,7 @@
 {
   "name": "IvrTransferAssistant",
+  "description": "Plays a welcome prompt, waits for DTMF, then listens for a name and transfers to a matched contact or fallback destination.",
+  "mode": "incoming",
   "language": "en-US",
   "prompts": {
     "welcome": "custom/welcome_press1",
@@ -18,5 +20,6 @@
   "transfer": {
     "destination": "",
     "trunk": ""
-  }
+  },
+  "flow": "flowchart TD\n    A([Incoming Call]) --> B[/Play welcome_press1/]\n    B --> C{Wait for DTMF}\n    C -->|Press 1| D[/Play speak_your_name/]\n    C -->|Wrong key| E{Retry count < 3?}\n    E -->|Yes| C\n    E -->|No| F([Hangup])\n    D --> G{Listen for voice}\n    G -->|Transcription >= 3 chars| H{Contact match?}\n    H -->|Match found| I([Transfer to matched contact])\n    H -->|No match| J([Transfer to destination])"
 }

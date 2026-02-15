@@ -1,7 +1,4 @@
 const util = require("util");
-const express = require("express");
-const app = express();
-const server = require("http").createServer(app);
 const ari = require("ari-client");
 const EventEmitter = require("events");
 const WebSocket = require("ws");
@@ -32,44 +29,42 @@ interface CallSessionData {
 
 class AriControllerServer extends EventEmitter {
   private pbxIP: string;
-  private accessKey: string;
-  private secretKey: string;
   private client: any;
-  private udpServer: any;
-  private transcriptionServerIp: string;
-  private transcriptionServerPort: string;
   private ws: any;
   private contacts: any;
   private sessionManager: InstanceType<typeof CallSessionManager>;
   private useRustRtp: boolean;
   private rustServerUrl: string | undefined;
+  private dashboard: any;
+  private callHistory: any;
 
   // Map to store per-session WebSocket message handlers
   private sessionMessageHandlers: Map<string, (message: any) => void> =
     new Map();
 
-  constructor(pbxIP: string, accessKey: string, secretKey: string, rustServerUrl?: string) {
+  constructor(
+    pbxIP: string,
+    rustServerUrl?: string,
+    deps?: { dashboard?: any; callHistory?: any }
+  ) {
     super();
     this.pbxIP = pbxIP;
-    this.accessKey = accessKey;
-    this.secretKey = secretKey;
     this.client = null;
-
-    this.udpServer = null;
-    this.transcriptionServerIp = "0.0.0.0";
-    this.transcriptionServerPort = "3044";
 
     this.useRustRtp = !!rustServerUrl;
     this.rustServerUrl = rustServerUrl;
+
+    // Injected dependencies (from Nitro bootstrap plugin)
+    this.dashboard = deps?.dashboard || null;
+    this.callHistory = deps?.callHistory || null;
 
     // Use the session manager for multi-call support
     this.sessionManager = sessionManager;
   }
 
   async start(contacts: any[]) {
-    await this.connectARI();
-    this.startARILoop();
-    this.startWebServer();
+    // Connect to transcription/RTP WebSocket
+    this.connectTranscriptionWS();
     this.contacts = contacts;
 
     if (this.contacts) {
@@ -77,11 +72,24 @@ class AriControllerServer extends EventEmitter {
     } else {
       console.log("Failed to convert JSON file to hash map");
     }
+
+    // Connect to Asterisk ARI
+    await this.connectARI();
+    if (this.dashboard) {
+      this.dashboard.updateServiceStatus("asterisk", "connected", this.pbxIP);
+    }
+
+    this.startARILoop();
   }
 
   async connectARI(): Promise<void> {
+    if (!this.pbxIP) {
+      throw new Error("PBX_IP not configured — cannot connect to ARI");
+    }
+
     return new Promise((resolve, reject) => {
       const ariEndpoint = `http://${this.pbxIP}:8088`;
+      console.log(`[Controller] Connecting to ARI: ${ariEndpoint}`);
 
       ari.connect(
         ariEndpoint,
@@ -89,9 +97,26 @@ class AriControllerServer extends EventEmitter {
         process.env.ASTERISK_PASSWORD,
         (err: any, client: any) => {
           if (err) {
-            reject(err);
+            const errMsg = typeof err === "string" ? err : (err.message || String(err));
+            if (this.dashboard) {
+              this.dashboard.updateServiceStatus("asterisk", "error", errMsg);
+            }
+            reject(new Error(errMsg));
           } else {
             this.client = client;
+            // Prevent unhandled 'error' events on the ARI client WebSocket
+            if (client._ws) {
+              client._ws.on("error", (wsErr: any) => {
+                console.error(`[Controller] ARI WebSocket error: ${wsErr.message || wsErr}`);
+              });
+              client._ws.on("close", () => {
+                console.error("[Controller] ARI WebSocket closed unexpectedly");
+                if (this.dashboard) {
+                  this.dashboard.updateServiceStatus("asterisk", "disconnected", "Connection lost");
+                }
+                this.scheduleARIReconnect();
+              });
+            }
             resolve();
           }
         }
@@ -131,42 +156,97 @@ class AriControllerServer extends EventEmitter {
     this.client.start(appName);
   }
 
-  startWebServer() {
-    const port = 3011;
-    server.listen(port, () => {
-      console.log(`Listening on *:${port}`);
-    });
-
-    app.use(express.static(__dirname + "/public"));
-    app.get("/", (req: any, res: any) => {
-      res.sendFile(__dirname + "/testPage.html");
-    });
-
-    console.log("Client connected");
-
-    // Connect to either Rust RTP server or legacy Node.js transcription server
-    const wsUrl = this.useRustRtp
-      ? `${this.rustServerUrl!.replace(/^http/, "ws")}/ws`
-      : `ws://${this.transcriptionServerIp}:${this.transcriptionServerPort}`;
+  connectTranscriptionWS() {
+    // Connect to either Rust RTP server or direct transcription WebSocket
+    let wsUrl: string;
+    if (this.useRustRtp) {
+      wsUrl = `${this.rustServerUrl!.replace(/^http/, "ws")}/ws`;
+    } else {
+      // Use the first ws:// entry from TRANSCRIPTION_SERVICES
+      const raw = (process.env.TRANSCRIPTION_SERVICES || "").split(",").map(s => s.trim()).find(s => s.startsWith("ws://"));
+      if (!raw) {
+        console.error("[Controller] No ws:// transcription service configured and Rust RTP not enabled");
+        if (this.dashboard) {
+          this.dashboard.updateServiceStatus("transcription", "error", "No transcription service configured");
+        }
+        return;
+      }
+      wsUrl = raw;
+    }
 
     console.log(`[Controller] Connecting WebSocket to: ${wsUrl}`);
-    this.ws = new WebSocket(wsUrl);
 
-    this.ws.onopen = () => {
+    try {
+      this.ws = new WebSocket(wsUrl);
+    } catch (err: any) {
+      console.error(`[Controller] Failed to create WebSocket: ${err.message}`);
+      if (this.dashboard) {
+        this.dashboard.updateServiceStatus("transcription", "error", "Connection failed");
+      }
+      return;
+    }
+
+    // IMPORTANT: Register 'error' handler via EventEmitter to prevent
+    // unhandled 'error' events from crashing Node.js
+    this.ws.on("error", (err: any) => {
+      console.error(`[Controller] WebSocket error: ${err.message || err}`);
+      if (this.dashboard) {
+        this.dashboard.updateServiceStatus("transcription", "error", "Connection failed");
+      }
+    });
+
+    this.ws.on("open", () => {
       console.log(`WebSocket connection established (${this.useRustRtp ? "Rust RTP" : "Node.js transcriber"})`);
-    };
+      if (this.dashboard) {
+        if (this.useRustRtp) {
+          this.dashboard.updateServiceStatus("rustRtp", "connected", this.rustServerUrl);
+          this.dashboard.updateServiceStatus("transcription", "connected", process.env.TRANSCRIPTION_SERVICES || "via Rust");
+        } else {
+          this.dashboard.updateServiceStatus("transcription", "connected", wsUrl);
+        }
+      }
+    });
 
     // Central message router - routes transcriptions to the correct session handler
-    this.ws.onmessage = (message: any) => {
-      console.log("Received transcription:", message.data);
+    this.ws.on("message", (data: any) => {
+      const raw = typeof data === "string" ? data : data.toString();
+      console.log("Received transcription:", raw);
 
       // Try to parse message with session ID, or broadcast to all handlers
       let parsedMessage: any;
       try {
-        parsedMessage = JSON.parse(message.data);
+        parsedMessage = JSON.parse(raw);
       } catch {
         // Plain text message - route to all active handlers
-        parsedMessage = { text: message.data };
+        parsedMessage = { text: raw };
+      }
+
+      // Forward to dashboard + persist
+      if (parsedMessage.text) {
+        const isFinal = parsedMessage.is_final || parsedMessage.isFinal || false;
+        const sessionId = parsedMessage.sessionId || "";
+
+        if (this.dashboard) {
+          // First transcription proves the full pipeline is working
+          if (this.useRustRtp) {
+            this.dashboard.updateServiceStatus("transcription", "connected", process.env.TRANSCRIPTION_SERVICES || "via Rust");
+          }
+          this.dashboard.emitTranscription({ sessionId, text: parsedMessage.text, is_final: isFinal });
+        }
+
+        // Persist only final transcriptions to avoid DB bloat
+        if (this.callHistory && isFinal && sessionId) {
+          try {
+            this.callHistory.saveTranscription({
+              callId: sessionId,
+              text: parsedMessage.text,
+              isFinal: true,
+              timestamp: new Date().toISOString(),
+            });
+          } catch (err: any) {
+            console.error(`[CallHistory] Failed to save transcription for ${sessionId}:`, err.message);
+          }
+        }
       }
 
       // If message has sessionId, route to specific handler
@@ -178,14 +258,101 @@ class AriControllerServer extends EventEmitter {
       } else {
         // Broadcast to all handlers (fallback for non-tagged messages)
         for (const handler of this.sessionMessageHandlers.values()) {
-          handler({ text: message.data });
+          handler({ text: raw });
         }
       }
-    };
+    });
 
-    this.ws.onclose = () => {
-      console.log("WebSocket connection to AriTranscriber server closed");
-    };
+    this.ws.on("close", () => {
+      console.log("[Controller] Transcription WebSocket closed");
+      if (this.dashboard) {
+        this.dashboard.updateServiceStatus("transcription", "disconnected");
+        if (this.useRustRtp) {
+          this.dashboard.updateServiceStatus("rustRtp", "disconnected");
+        }
+      }
+      // Auto-reconnect after 5 seconds
+      this.scheduleTranscriptionReconnect();
+    });
+  }
+
+  private transcriptionReconnectTimer: any = null;
+
+  private scheduleTranscriptionReconnect() {
+    if (this.transcriptionReconnectTimer) return;
+    console.log("[Controller] Scheduling transcription WS reconnect in 5s...");
+    this.transcriptionReconnectTimer = setTimeout(() => {
+      this.transcriptionReconnectTimer = null;
+      console.log("[Controller] Attempting transcription WS reconnect...");
+      this.connectTranscriptionWS();
+    }, 5000);
+  }
+
+  private ariReconnectTimer: any = null;
+
+  private scheduleARIReconnect() {
+    if (this.ariReconnectTimer) return;
+    console.log("[Controller] Scheduling ARI reconnect in 10s...");
+    this.ariReconnectTimer = setTimeout(async () => {
+      this.ariReconnectTimer = null;
+      try {
+        console.log("[Controller] Attempting ARI reconnect...");
+        await this.connectARI();
+        this.startARILoop();
+        if (this.dashboard) {
+          this.dashboard.updateServiceStatus("asterisk", "connected", this.pbxIP);
+        }
+        console.log("[Controller] ARI reconnected successfully");
+        // Purge sessions whose channels died during the disconnect
+        await this.reconcileSessions();
+      } catch (err: any) {
+        console.error(`[Controller] ARI reconnect failed: ${err.message}`);
+        this.scheduleARIReconnect(); // Retry again
+      }
+    }, 10000);
+  }
+
+  /**
+   * After ARI reconnect, check tracked sessions against live ARI channels.
+   * Purge any session whose incoming channel no longer exists.
+   */
+  private async reconcileSessions() {
+    if (!this.client) return;
+
+    const activeIds = this.sessionManager.getActiveSessionIds();
+    if (activeIds.length === 0) return;
+
+    console.log(`[Controller] Reconciling ${activeIds.length} session(s) after reconnect...`);
+
+    let liveChannelIds: Set<string>;
+    try {
+      const channels = await this.client.channels.list();
+      liveChannelIds = new Set((channels || []).map((ch: any) => ch.id));
+    } catch (err: any) {
+      console.error(`[Controller] Failed to list channels for reconciliation: ${err.message}`);
+      return;
+    }
+
+    let purged = 0;
+    for (const sessionId of activeIds) {
+      const session = this.sessionManager.getSession(sessionId);
+      if (!session) continue;
+
+      const incomingAlive = session.incomingChannel?.id && liveChannelIds.has(session.incomingChannel.id);
+      if (!incomingAlive) {
+        console.log(`[Controller] Purging stale session ${sessionId} — incoming channel gone`);
+        this.sessionMessageHandlers.delete(sessionId);
+        this.deleteRustSession(sessionId);
+        if (this.dashboard) this.dashboard.emitCallEnded(sessionId);
+        if (this.callHistory) this.callHistory.endCall(sessionId);
+        this.sessionManager.endSession(sessionId);
+        purged++;
+      }
+    }
+
+    if (purged > 0) {
+      console.log(`[Controller] Purged ${purged} stale session(s)`);
+    }
   }
 
   async stasisStart(event: any, channel: any) {
@@ -201,7 +368,21 @@ class AriControllerServer extends EventEmitter {
 
     await channel.answer();
 
-    if (dialed) {
+    if (event.args[0] === "campaign") {
+      // Campaign call originated by AutoDialer — full pipeline (same as incoming)
+      const sessionId = event.args[1];
+      const assistantSlug = event.args[2];
+      const callerId = event.args[3] || "unknown";
+      const phone = event.args[4] || "";
+      const callerName = event.args[5] ? decodeURIComponent(event.args[5]) : "";
+      console.log(`[Controller] Campaign call for ${phone} (session ${sessionId})`);
+      try {
+        await this.handleCampaignCall(channel, sessionId, assistantSlug, callerId, phone, callerName);
+      } catch (err: any) {
+        console.error(`[Controller] handleCampaignCall failed: ${err.message || err}`);
+        try { this.playAudio(channel, "beep"); } catch {}
+      }
+    } else if (dialed) {
       // Outgoing channel (dialed party) - find its session and add to bridge
       console.log("This channel is dialed (outgoing)");
 
@@ -226,7 +407,13 @@ class AriControllerServer extends EventEmitter {
     } else {
       // New incoming call - create a new session
       console.log("New incoming call - creating session");
-      await this.handleIncomingCall(channel);
+      try {
+        await this.handleIncomingCall(channel);
+      } catch (err: any) {
+        console.error(`[Controller] handleIncomingCall failed: ${err.message || err}`);
+        // Try to play an error tone so the caller knows something is wrong
+        try { this.playAudio(channel, "beep"); } catch {}
+      }
     }
   }
 
@@ -259,20 +446,26 @@ class AriControllerServer extends EventEmitter {
     await this.createExternalMediaChannelForSession(sessionId);
 
     // Create assistant for this session
-    // Auto-select: use direct-dial if DEFAULT_ASSISTANT not set and transfer destination not configured
-    let assistantType = process.env.DEFAULT_ASSISTANT;
-    if (!assistantType) {
-      const hasTransferDest = process.env.TRANSFER_DESTINATION && process.env.TRANSFER_TRUNK;
-      assistantType = hasTransferDest ? "ivr-transfer" : "direct-dial";
-      console.log(`[Session ${sessionId}] Auto-selected assistant: ${assistantType} (transfer destination ${hasTransferDest ? "configured" : "not configured"})`);
-    }
+    // Priority: 1) Extension-based routing (config/routing.json)
+    //           2) DEFAULT_ASSISTANT env var
+    //           3) Auto-detect based on transfer config
+    const extension = channel.dialplan?.exten || "unknown";
+    const callerId = channel.caller?.number || "unknown";
 
-    const assistant = AssistantFactory.createByType(
-      assistantType,
-      this.client,
-      sessionId,
-      this.contacts
-    );
+    let assistant: any;
+    const explicitAssistant = process.env.DEFAULT_ASSISTANT;
+    if (explicitAssistant) {
+      // Env var override — always use this assistant
+      assistant = AssistantFactory.createByType(
+        explicitAssistant, this.client, sessionId, this.contacts
+      );
+    } else {
+      // Use extension-based routing (config/routing.json)
+      assistant = AssistantFactory.createFromExtension(
+        extension, this.client, sessionId, this.contacts
+      );
+    }
+    const assistantType = assistant.getConfig().name;
 
     console.log(`[Session ${sessionId}] Using assistant: ${assistantType} (${assistant.config.name})`);
 
@@ -285,10 +478,97 @@ class AriControllerServer extends EventEmitter {
     // Set up session-specific transcription handler (routes to assistant)
     this.setupSessionTranscriptionHandler(session);
 
+    // Notify dashboard & persist BEFORE assistant starts (playback may block/hang)
+    const callData = {
+      id: sessionId,
+      callerId,
+      callerName: channel.caller?.name || "",
+      extension,
+      channelName: channel.name || "",
+      assistant: assistantType,
+      assistantName: assistant.config?.name || assistantType,
+      startTime: new Date().toISOString(),
+      status: "active",
+    };
+    if (this.dashboard) {
+      this.dashboard.emitCallUpdate(callData);
+    }
+    if (this.callHistory) {
+      this.callHistory.saveCall(callData);
+    }
+
     // Let the assistant handle call start (plays welcome, sets state)
-    const callerId = channel.caller?.number || "unknown";
-    const extension = channel.dialplan?.exten || "unknown";
     await assistant.onCallStart(channel, callerId, extension);
+  }
+
+  /**
+   * Handle a campaign call originated by AutoDialer.
+   * Same full pipeline as handleIncomingCall (bridge, RTP, transcription, assistant).
+   */
+  async handleCampaignCall(
+    channel: any,
+    sessionId: string,
+    assistantSlug: string,
+    campaignCallerId: string,
+    campaignPhone: string,
+    campaignCallerName: string,
+  ) {
+    // Create dedicated bridge
+    const bridge = await this.createBridgeForSession(sessionId);
+
+    // Create session (using AutoDialer's pre-generated sessionId)
+    const session = this.sessionManager.createSession(sessionId, bridge, channel);
+
+    // Store campaign-specific info for dashboard display
+    (session as any).campaignCallerId = campaignCallerId;
+    (session as any).campaignCallerName = campaignCallerName;
+    (session as any).campaignPhone = campaignPhone;
+
+    console.log(`[Session ${sessionId}] Campaign call: ${campaignCallerId} → ${campaignPhone}`);
+
+    // Add channel to its dedicated bridge
+    this.addChannelToBridge(channel, bridge);
+
+    // Create Rust RTP session + ExternalMedia channel (audio pipeline)
+    await this.createRustSession(sessionId);
+    await this.createExternalMediaChannelForSession(sessionId);
+
+    // Create assistant
+    const assistant = AssistantFactory.createByType(assistantSlug, this.client, sessionId, this.contacts);
+    this.sessionManager.setAssistant(sessionId, assistant);
+
+    // Wire assistant events (state changes, transfers, DTMF) to dashboard
+    this.setupAssistantEventHandlers(session, assistant, channel);
+
+    // Route transcriptions to the assistant
+    this.setupSessionTranscriptionHandler(session);
+
+    // Store callResult on session so AutoDialer can read it at StasisEnd
+    assistant.on("callResult", (data: { result: string }) => {
+      (session as any).campaignResult = data.result;
+    });
+
+    // Notify dashboard & persist
+    const callData = {
+      id: sessionId,
+      callerId: campaignCallerId,
+      callerName: campaignCallerName,
+      extension: campaignPhone,
+      channelName: channel.name || "",
+      assistant: assistantSlug,
+      assistantName: assistant.config?.name || assistantSlug,
+      startTime: new Date().toISOString(),
+      status: "active",
+    };
+    if (this.dashboard) {
+      this.dashboard.emitCallUpdate(callData);
+    }
+    if (this.callHistory) {
+      this.callHistory.saveCall(callData);
+    }
+
+    // Let the assistant handle call start
+    await assistant.onCallStart(channel, campaignPhone, campaignPhone);
   }
 
   /**
@@ -345,6 +625,13 @@ class AriControllerServer extends EventEmitter {
       this.initiateOutgoingCall(session, channel, data.number);
       this.sessionMessageHandlers.delete(sessionId);
       this.deleteRustSession(sessionId);
+    });
+
+    // Broadcast assistant state changes to dashboard
+    assistant.on("stateChange", (data: { sessionId: string; prev: string; state: string }) => {
+      if (this.dashboard) {
+        this.dashboard.emitAssistantState(data);
+      }
     });
 
     // Handle generic transfer request
@@ -441,7 +728,6 @@ class AriControllerServer extends EventEmitter {
     recipient: string
   ) {
     const fromNumber = process.env.FROM_NUMBER || "unknown";
-    const sipProvider = process.env.SIP_PROVIDER;
     const appName = process.env.STASIS_APP_NAME || "stasis-app";
 
     const outgoingChannelParams = {
@@ -550,6 +836,16 @@ class AriControllerServer extends EventEmitter {
       // Clean up Rust RTP session
       this.deleteRustSession(session.id);
 
+      // Notify dashboard
+      if (this.dashboard) {
+        this.dashboard.emitCallEnded(session.id);
+      }
+
+      // Persist call end to history
+      if (this.callHistory) {
+        this.callHistory.endCall(session.id);
+      }
+
       // End only this session, not all calls
       this.sessionManager.endSession(session.id);
     } else {
@@ -564,6 +860,11 @@ class AriControllerServer extends EventEmitter {
     // Find session for this channel and route to assistant
     const session = this.sessionManager.getSessionByChannelId(channel.id);
     if (session) {
+      // Broadcast DTMF to dashboard
+      if (this.dashboard) {
+        this.dashboard.emitDTMF({ sessionId: session.id, digit });
+      }
+
       const assistant = this.sessionManager.getAssistant(session.id);
       if (assistant) {
         assistant.onDTMFInput(digit);
@@ -712,6 +1013,53 @@ class AriControllerServer extends EventEmitter {
       });
   }
 
+  /**
+   * Handle actions from the dashboard UI (hang up, transfer)
+   */
+  handleDashboardAction(action: string, data: any) {
+    if (action === "hangup") {
+      const session = this.sessionManager.getSession(data.sessionId);
+      if (session) {
+        console.log(`[Dashboard] Hanging up session ${data.sessionId}`);
+        this.sessionMessageHandlers.delete(session.id);
+        this.deleteRustSession(session.id);
+        if (this.dashboard) this.dashboard.emitCallEnded(session.id);
+        if (this.callHistory) this.callHistory.endCall(session.id);
+        this.sessionManager.endSession(session.id);
+      }
+    } else if (action === "transfer") {
+      const session = this.sessionManager.getSession(data.sessionId);
+      if (session) {
+        console.log(`[Dashboard] Transferring ${data.sessionId} → ${data.endpoint}`);
+        this.initiateOutgoingCall(session, session.incomingChannel, data.endpoint);
+        this.sessionMessageHandlers.delete(session.id);
+        this.deleteRustSession(session.id);
+      }
+    } else if (action === "reconnectAri") {
+      console.log("[Dashboard] Manual ARI reconnect requested");
+      if (this.dashboard) this.dashboard.updateServiceStatus("asterisk", "connecting", "Reconnecting...");
+      try { if (this.client?._ws) this.client._ws.close(); } catch {}
+      if (this.ariReconnectTimer) { clearTimeout(this.ariReconnectTimer); this.ariReconnectTimer = null; }
+      this.connectARI().then(async () => {
+        this.startARILoop();
+        if (this.dashboard) this.dashboard.updateServiceStatus("asterisk", "connected", this.pbxIP);
+        console.log("[Dashboard] Manual ARI reconnect succeeded");
+        await this.reconcileSessions();
+      }).catch((err: any) => {
+        console.error(`[Dashboard] Manual ARI reconnect failed: ${err.message}`);
+      });
+    } else if (action === "reconnectTranscription") {
+      console.log("[Dashboard] Manual transcription reconnect requested");
+      if (this.dashboard) {
+        this.dashboard.updateServiceStatus("transcription", "connecting", "Reconnecting...");
+        if (this.useRustRtp) this.dashboard.updateServiceStatus("rustRtp", "connecting", "Reconnecting...");
+      }
+      try { if (this.ws) this.ws.close(); } catch {}
+      if (this.transcriptionReconnectTimer) { clearTimeout(this.transcriptionReconnectTimer); this.transcriptionReconnectTimer = null; }
+      this.connectTranscriptionWS();
+    }
+  }
+
   getClient(): any {
     return this.client;
   }
@@ -720,10 +1068,30 @@ class AriControllerServer extends EventEmitter {
     console.log("Closing AriControllerServer...");
 
     // End all active sessions gracefully
-    await this.sessionManager.endAllSessions();
+    try {
+      await this.sessionManager.endAllSessions();
+    } catch (err: any) {
+      console.error("[Controller] Error ending sessions:", err.message);
+    }
 
     // Clear message handlers
     this.sessionMessageHandlers.clear();
+
+    // Cancel reconnect timers
+    if (this.transcriptionReconnectTimer) {
+      clearTimeout(this.transcriptionReconnectTimer);
+      this.transcriptionReconnectTimer = null;
+    }
+    if (this.ariReconnectTimer) {
+      clearTimeout(this.ariReconnectTimer);
+      this.ariReconnectTimer = null;
+    }
+
+    // Close WebSocket
+    if (this.ws) {
+      try { this.ws.close(); } catch {}
+      this.ws = null;
+    }
 
     this.emit("close");
   }

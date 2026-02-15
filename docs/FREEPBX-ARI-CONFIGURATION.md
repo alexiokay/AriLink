@@ -36,17 +36,75 @@ This guide shows you how to configure FreePBX for:
 
 ARI (Asterisk REST Interface) allows your Node.js application to control Asterisk.
 
-### Method A: Via GUI (if available)
-**Admin** → **Asterisk REST Interface (ARI)**
+> **Important: FreePBX vs plain Asterisk**
+>
+> FreePBX auto-generates `ari.conf` and `ari_additional.conf` from its database on every reload and reboot. **Do NOT edit these files directly** — FreePBX will overwrite your changes and ARI endpoints may fail to register after reboot.
+>
+> - **FreePBX**: Always use **Method A** (GUI) for user management.
+> - **Plain Asterisk** (no FreePBX): Use **Method B** (config file) — you own the config files.
 
-- **Username**: `asterisk-ari` (or any name)
-- **Password**: `[strong password]`
-- **Read-Only**: ❌ No
-- **Applications**: `stasis-app`
+### Method A: Via FreePBX GUI (recommended for FreePBX)
 
-### Method B: Via Config File (if GUI not available)
+**Settings** → **Asterisk REST Interface Users**
 
-SSH into FreePBX and edit ARI configuration:
+1. Click **Add User**
+2. Fill in:
+   - **Username**: `asterisk-ari` (or any name)
+   - **Password**: use **alphanumeric characters only** (special characters can break FreePBX's config generator)
+   - **Read-Only**: No
+3. Click **Submit**, then **Apply Config**
+
+For the `[general]` section (enabling ARI), use `ari_general_custom.conf`:
+
+```bash
+sudo nano /etc/asterisk/ari_general_custom.conf
+```
+
+This file should ONLY contain general settings, **not user definitions**:
+
+```ini
+[general]
+enabled=yes
+pretty=yes
+allowed_origins=*
+```
+
+Then apply:
+
+```bash
+fwconsole reload
+```
+
+> **Known FreePBX bug**: ARI HTTP endpoints may not register on boot despite modules being loaded. If ARI fails after VM/server restart, run:
+> ```bash
+> asterisk -rx "module reload res_ari.so"
+> ```
+> To automate this fix permanently, create a systemd service:
+> ```bash
+> cat > /etc/systemd/system/ari-fix.service << 'EOF'
+> [Unit]
+> Description=Reload ARI modules after Asterisk starts
+> After=asterisk.service
+> Requires=asterisk.service
+>
+> [Service]
+> Type=oneshot
+> ExecStartPre=/bin/sleep 15
+> ExecStart=/usr/sbin/asterisk -rx "module reload res_ari.so"
+> ExecStartPost=/usr/sbin/asterisk -rx "module reload res_http_websocket.so"
+> RemainAfterExit=yes
+>
+> [Install]
+> WantedBy=multi-user.target
+> EOF
+>
+> systemctl daemon-reload
+> systemctl enable ari-fix.service
+> ```
+
+### Method B: Via Config File (plain Asterisk only — NOT for FreePBX)
+
+SSH into the Asterisk server and edit ARI configuration:
 
 ```bash
 sudo nano /etc/asterisk/ari.conf
@@ -330,8 +388,10 @@ WebSocket connection to AriTranscriber server established
 
 ### "ARI connection failed"
 - Test with curl (see step 8)
-- Check HTTP server: `asterisk -rx "http show status"`
-- Verify credentials in `.env` match `/etc/asterisk/ari.conf`
+- Check HTTP server: `asterisk -rx "http show status"` — look for `/ari` in the registered URIs
+- Verify credentials in `.env` match what's configured in ARI
+- **FreePBX reboot issue**: If ARI worked before a reboot but not after, run `asterisk -rx "module reload res_ari.so"` — see the systemd fix in Step 1
+- **Do not edit `ari.conf` directly on FreePBX** — use the GUI (Settings → Asterisk REST Interface Users). Direct edits get overwritten and can cause ARI endpoints to fail silently
 
 ### "SIP trunk not connecting"
 - Check trunk credentials and IP addresses

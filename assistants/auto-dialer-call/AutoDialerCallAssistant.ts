@@ -1,7 +1,8 @@
 const { BaseAssistant } = require("../base/BaseAssistant");
 const { InactivityTimer } = require("../../tools/InactivityTimer");
+const { AssistantState } = require("../base/AssistantTypes");
 
-import type { AssistantConfig, AssistantState } from "../base/AssistantTypes";
+import type { AssistantConfig } from "../base/AssistantTypes";
 
 const dialerConfig: AssistantConfig = require("./config.json");
 
@@ -23,11 +24,11 @@ class AutoDialerCallAssistant extends BaseAssistant {
 
   constructor(client: any, sessionId: string) {
     super(dialerConfig, client, sessionId);
-    this.transferDigit = (dialerConfig.behavior as any).transferDigit || "1";
+    this.transferDigit = dialerConfig.behavior.transferDigit || "1";
     this.timer = new InactivityTimer(
       this.config.behavior.timeoutSeconds || 15,
       async () => {
-        if (this.state === "listening") {
+        if (this.isState(AssistantState.LISTENING)) {
           console.log(`[AutoDialer][Session ${this.sessionId}] Timeout - no DTMF input`);
           this.result = "no_interest";
 
@@ -50,31 +51,25 @@ class AutoDialerCallAssistant extends BaseAssistant {
     console.log(`[AutoDialer][Session ${this.sessionId}] Call answered by ${extension}`);
 
     // Play the campaign message
-    this.setState("speaking" as AssistantState);
-
-    try {
-      await this.playAudio(this.config.prompts.welcome);
-    } catch (err) {
-      console.warn(`[AutoDialer][Session ${this.sessionId}] Welcome audio not found, using fallback`);
-      await this.playAudio("beep");
-    }
+    this.setState(AssistantState.SPEAKING);
+    await this.playAudioWithFallback(this.config.prompts.welcome, "beep");
 
     // Now waiting for DTMF
-    this.setState("listening" as AssistantState);
+    this.setState(AssistantState.LISTENING);
     this.timer.start();
   }
 
   async onDTMFInput(digit: string): Promise<void> {
     console.log(`[AutoDialer][Session ${this.sessionId}] DTMF: ${digit} (state: ${this.state})`);
 
-    if (this.state !== "listening") return;
+    if (!this.isState(AssistantState.LISTENING)) return;
 
     this.timer.cancel();
 
     if (digit === this.transferDigit) {
       // Interested - transfer to destination
       this.result = "transferred";
-      this.setState("transferring" as AssistantState);
+      this.setState(AssistantState.TRANSFERRING, "destination");
 
       console.log(`[AutoDialer][Session ${this.sessionId}] Press ${digit} → transferring`);
 
@@ -95,7 +90,7 @@ class AutoDialerCallAssistant extends BaseAssistant {
   async onCallEnd(channel: any): Promise<void> {
     this.timer.cancel();
     console.log(`[AutoDialer][Session ${this.sessionId}] Call ended. Result: ${this.result}`);
-    this.setState("idle" as AssistantState);
+    this.setState(AssistantState.IDLE);
 
     this.emit("callResult", {
       sessionId: this.sessionId,

@@ -1,5 +1,7 @@
 {
   "name": "DirectDialAssistant",
+  "description": "Listens for speech immediately and transfers to the first matching contact. Simple voice-to-dial with retry logic.",
+  "mode": "incoming",
   "language": "en-US",
   "prompts": {
     "welcome": "custom/welcome_2",
@@ -14,5 +16,6 @@
     "silenceThresholdSeconds": 5,
     "maxNoMatches": 12,
     "tryAgainInterval": 3
-  }
+  },
+  "flow": "flowchart TD\n    A([Incoming Call]) --> B[/Play welcome_2/]\n    B --> C{Listen for voice}\n    C -->|Transcription received| D{Contact match?}\n    D -->|Match found| E([Transfer to contact])\n    D -->|No match| F{Attempt count}\n    F -->|Every 3rd attempt| G[/Play try_again/]\n    G --> C\n    F -->|< 12 attempts| C\n    F -->|>= 12 attempts| H([Hangup])"
 }

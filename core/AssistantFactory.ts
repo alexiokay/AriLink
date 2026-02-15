@@ -1,46 +1,125 @@
+const path = require("path");
+const fs = require("fs");
+
 import type { IAssistant } from "../assistants/base/AssistantTypes";
+
+// Routing config: maps extensions/callerIDs to assistant types
+interface RoutingRule {
+  pattern: string;  // regex pattern or exact match
+  assistant: string; // assistant slug (folder name)
+}
+interface RoutingConfig {
+  extensionRoutes?: RoutingRule[];
+  callerIdRoutes?: RoutingRule[];
+  defaultAssistant?: string;
+}
+
+let routingConfig: RoutingConfig | null = null;
+
+function loadRoutingConfig(): RoutingConfig {
+  if (routingConfig) return routingConfig;
+
+  const configPath = path.resolve(__dirname, "../config/routing.json");
+  if (fs.existsSync(configPath)) {
+    try {
+      routingConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      console.log(`[AssistantFactory] Loaded routing config from ${configPath}`);
+    } catch (err: any) {
+      console.warn(`[AssistantFactory] Failed to parse routing.json: ${err.message}`);
+      routingConfig = {};
+    }
+  } else {
+    routingConfig = {};
+  }
+  return routingConfig!;
+}
+
+function matchRoute(value: string, rules: RoutingRule[]): string | null {
+  for (const rule of rules) {
+    try {
+      if (new RegExp(`^${rule.pattern}$`).test(value)) {
+        return rule.assistant;
+      }
+    } catch {
+      // Invalid regex — try exact match
+      if (value === rule.pattern) return rule.assistant;
+    }
+  }
+  return null;
+}
 
 /**
  * AssistantFactory
  *
- * Creates the appropriate assistant based on extension routing,
- * explicit type, or caller ID.
+ * Dynamically discovers assistants by scanning the assistants/ directory.
+ * Each subfolder with a config.json and an *Assistant.ts file is registered.
  *
- * Assistants are lazy-loaded — to add a new one, just add a case
- * to createByType() with a require() pointing to its folder.
- *
- * Available assistants:
- * - "ivr-transfer": IVR flow (Press 1 → Speak name → Transfer to destination)
- * - "direct-dial": Voice → Contact match → Direct dial
- * - "auto-dialer-call": Outbound auto-dialer (Play message → DTMF → Transfer)
+ * To add a new assistant, create a new folder under assistants/ with:
+ * - config.json (with name, mode, prompts, behavior)
+ * - YourAssistant.ts (exporting a class named YourAssistant)
  */
 
-// Registry of assistant constructors (populated on first use via lazy loading)
-const assistantRegistry: Record<string, any> = {};
+// Registry: slug -> { modulePath, exportName }
+let registry: Record<string, { modulePath: string; exportName: string }> | null = null;
+// Cache of loaded constructors
+const assistantCache: Record<string, any> = {};
+
+function buildRegistry(): Record<string, { modulePath: string; exportName: string }> {
+  const assistantsDir = path.resolve(__dirname, "../assistants");
+  const entries = fs.readdirSync(assistantsDir);
+  const reg: Record<string, { modulePath: string; exportName: string }> = {};
+
+  for (const entry of entries) {
+    if (entry === "base") continue;
+    const dirPath = path.join(assistantsDir, entry);
+    if (!fs.statSync(dirPath).isDirectory()) continue;
+
+    // Find the *Assistant.ts (or .js) file in this directory
+    const files = fs.readdirSync(dirPath);
+    const assistantFile = files.find((f: string) =>
+      (f.endsWith("Assistant.ts") || f.endsWith("Assistant.js")) && !f.endsWith(".d.ts")
+    );
+    if (!assistantFile) continue;
+
+    // Derive export name from filename: "IvrTransferAssistant.ts" -> "IvrTransferAssistant"
+    const exportName = assistantFile.replace(/\.(ts|js)$/, "");
+    const modulePath = path.join(dirPath, assistantFile);
+
+    reg[entry] = { modulePath, exportName };
+  }
+
+  console.log(`[AssistantFactory] Discovered ${Object.keys(reg).length} assistants: ${Object.keys(reg).join(", ")}`);
+  return reg;
+}
 
 function getAssistantClass(type: string): any {
-  if (!assistantRegistry[type]) {
-    switch (type) {
-      case "ivr-transfer":
-        assistantRegistry[type] = require("../assistants/ivr-transfer/IvrTransferAssistant").IvrTransferAssistant;
-        break;
-      case "direct-dial":
-        assistantRegistry[type] = require("../assistants/direct-dial/DirectDialAssistant").DirectDialAssistant;
-        break;
-      case "auto-dialer-call":
-        assistantRegistry[type] = require("../assistants/auto-dialer-call/AutoDialerCallAssistant").AutoDialerCallAssistant;
-        break;
-      default:
-        // Fall back to ivr-transfer
-        return getAssistantClass("ivr-transfer");
-    }
+  if (!registry) {
+    registry = buildRegistry();
   }
-  return assistantRegistry[type];
+
+  if (assistantCache[type]) {
+    return assistantCache[type];
+  }
+
+  const entry = registry[type];
+  if (!entry) {
+    const available = Object.keys(registry).join(", ");
+    throw new Error(`[AssistantFactory] Unknown assistant type: "${type}". Available: ${available}`);
+  }
+
+  const mod = require(entry.modulePath);
+  const Constructor = mod[entry.exportName];
+  if (!Constructor) {
+    throw new Error(`[AssistantFactory] Module ${entry.modulePath} does not export "${entry.exportName}"`);
+  }
+
+  assistantCache[type] = Constructor;
+  return Constructor;
 }
 
 class AssistantFactory {
   /**
-   * Create assistant by explicit type name
+   * Create assistant by explicit type name (slug matches folder name)
    */
   static createByType(
     type: string,
@@ -53,7 +132,9 @@ class AssistantFactory {
   }
 
   /**
-   * Create assistant based on extension routing
+   * Create assistant based on extension routing.
+   * Reads rules from config/routing.json — extensionRoutes array.
+   * Falls back to defaultAssistant or "ivr-transfer".
    */
   static createFromExtension(
     extension: string,
@@ -61,15 +142,22 @@ class AssistantFactory {
     sessionId: string,
     contacts?: any
   ): IAssistant {
-    // Route by extension range
-    // Example: if (ext >= 100 && ext < 200) return AssistantFactory.createByType("direct-dial", ...)
-
-    // Default: IVR transfer for all extensions
-    return AssistantFactory.createByType("ivr-transfer", client, sessionId, contacts);
+    const config = loadRoutingConfig();
+    if (config.extensionRoutes?.length) {
+      const matched = matchRoute(extension, config.extensionRoutes);
+      if (matched) {
+        console.log(`[AssistantFactory] Extension ${extension} matched route → ${matched}`);
+        return AssistantFactory.createByType(matched, client, sessionId, contacts);
+      }
+    }
+    const fallback = config.defaultAssistant || "ivr-transfer";
+    return AssistantFactory.createByType(fallback, client, sessionId, contacts);
   }
 
   /**
-   * Create assistant based on caller ID (VIP routing, etc.)
+   * Create assistant based on caller ID.
+   * Reads rules from config/routing.json — callerIdRoutes array.
+   * Falls back to defaultAssistant or "ivr-transfer".
    */
   static createFromCallerId(
     callerId: string,
@@ -77,10 +165,24 @@ class AssistantFactory {
     sessionId: string,
     contacts?: any
   ): IAssistant {
-    // Future: Check database or CRM for VIP customers
-    // if (isVIPCustomer(callerId)) return AssistantFactory.createByType("vip", ...)
+    const config = loadRoutingConfig();
+    if (config.callerIdRoutes?.length) {
+      const matched = matchRoute(callerId, config.callerIdRoutes);
+      if (matched) {
+        console.log(`[AssistantFactory] CallerID ${callerId} matched route → ${matched}`);
+        return AssistantFactory.createByType(matched, client, sessionId, contacts);
+      }
+    }
+    const fallback = config.defaultAssistant || "ivr-transfer";
+    return AssistantFactory.createByType(fallback, client, sessionId, contacts);
+  }
 
-    return AssistantFactory.createByType("ivr-transfer", client, sessionId, contacts);
+  /**
+   * Reload routing config from disk (e.g., after editing via dashboard).
+   */
+  static reloadRouting(): void {
+    routingConfig = null;
+    loadRoutingConfig();
   }
 }
 

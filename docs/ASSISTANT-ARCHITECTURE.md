@@ -42,9 +42,8 @@ graph TB
     subgraph "AriLink"
         subgraph "Core Infrastructure"
             Controller[AriControllerServer]
-            Transcriber[AriTranscriberServer]
             Manager[SessionManager]
-            RTP[RTP/UDP Server]
+            RustRTP[Rust RTP Server]
         end
 
         subgraph "Assistant System"
@@ -79,11 +78,11 @@ graph TB
     Custom -.inherits.-> Base
 
     Controller <--> Manager
-    Transcriber --> RTP
-    Transcriber <--> Parakeet
-    Transcriber <--> Whisper
+    RustRTP --> RTP
+    RustRTP <--> Parakeet
+    RustRTP <--> Whisper
 
-    Controller <--> Transcriber
+    Controller <--> RustRTP
 
     style Controller fill:#e1f5ff
     style Factory fill:#fff4e1
@@ -174,7 +173,7 @@ sequenceDiagram
     participant Controller as AriControllerServer
     participant Factory as AssistantFactory
     participant Assistant as CustomerServiceAssistant
-    participant Transcriber as AriTranscriberServer
+    participant RustRTP as Rust RTP Server
     participant Parakeet as Parakeet Service
 
     Caller->>FreePBX: Dials extension 101
@@ -193,10 +192,10 @@ sequenceDiagram
     Assistant->>Assistant: setState(LISTENING)
 
     Caller->>FreePBX: Speaks "I need help"
-    FreePBX->>Transcriber: Audio stream (RTP)
-    Transcriber->>Parakeet: Audio data
-    Parakeet-->>Transcriber: Transcription
-    Transcriber->>Controller: Transcription event
+    FreePBX->>RustRTP: Audio stream (RTP)
+    RustRTP->>Parakeet: Audio data
+    Parakeet-->>RustRTP: Transcription
+    RustRTP->>Controller: Transcription event
 
     Controller->>Assistant: onTranscription("I need help", true)
     Assistant->>Assistant: Analyze intent

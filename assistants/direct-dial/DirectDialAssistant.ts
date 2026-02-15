@@ -1,8 +1,10 @@
 const { BaseAssistant } = require("../base/BaseAssistant");
 const { ContactMatcher } = require("../../tools/ContactMatcher");
 const { RetryManager } = require("../../tools/RetryManager");
+const { AssistantState } = require("../base/AssistantTypes");
 
-import type { AssistantConfig, AssistantState } from "../base/AssistantTypes";
+import type { AssistantConfig } from "../base/AssistantTypes";
+import type { ContactsData } from "../../tools/ContactMatcher";
 
 const directDialConfig: AssistantConfig = require("./config.json");
 
@@ -20,16 +22,23 @@ class DirectDialAssistant extends BaseAssistant {
   private contactMatcher: InstanceType<typeof ContactMatcher>;
   private retryManager: InstanceType<typeof RetryManager>;
 
-  constructor(client: any, sessionId: string, contacts?: any) {
+  constructor(client: any, sessionId: string, contacts?: ContactsData) {
     super(directDialConfig, client, sessionId);
     this.contactMatcher = new ContactMatcher(contacts);
+
+    const maxRetries = directDialConfig.behavior.maxNoMatches || 12;
+    const interval = directDialConfig.behavior.tryAgainInterval || 3;
+
     this.retryManager = new RetryManager({
-      maxRetries: (directDialConfig.behavior as any).maxNoMatches || 12,
+      maxRetries,
       onMaxReached: () => {
         console.log(`[DirectDial][Session ${this.sessionId}] Max no-matches reached, hanging up`);
         this.hangup();
       },
-      feedbackIntervals: [3, 6, 9],
+      feedbackIntervals: Array.from(
+        { length: Math.floor(maxRetries / interval) - 1 },
+        (_, i) => (i + 1) * interval
+      ),
       onFeedback: () => {
         this.playAudioNoWait(this.config.prompts.tryAgain);
       },
@@ -42,17 +51,11 @@ class DirectDialAssistant extends BaseAssistant {
     console.log(`[DirectDial][Session ${this.sessionId}] Call started from ${callerId} on ext ${extension}`);
 
     // Play welcome message
-    this.setState("speaking" as AssistantState);
-
-    try {
-      await this.playAudio(this.config.prompts.welcome);
-    } catch (err) {
-      console.warn(`[DirectDial] Custom welcome not found, using fallback`);
-      await this.playAudio("hello-world");
-    }
+    this.setState(AssistantState.SPEAKING);
+    await this.playAudioWithFallback(this.config.prompts.welcome, "hello-world");
 
     // Immediately start listening for voice (no DTMF gate)
-    this.setState("processing" as AssistantState);
+    this.setState(AssistantState.PROCESSING);
     this.playAudioNoWait("beep");
   }
 
@@ -62,7 +65,7 @@ class DirectDialAssistant extends BaseAssistant {
   }
 
   async onTranscription(text: string, isFinal: boolean): Promise<void> {
-    if (this.state !== "processing") {
+    if (!this.isState(AssistantState.PROCESSING)) {
       return;
     }
 
@@ -76,7 +79,7 @@ class DirectDialAssistant extends BaseAssistant {
       this.retryManager.attempt();
     } else {
       console.log(`[DirectDial][Session ${this.sessionId}] Contact matched: ${foundNumber}`);
-      this.setState("transferring" as AssistantState);
+      this.setState(AssistantState.TRANSFERRING, foundNumber);
       this.emit("contactMatched", {
         sessionId: this.sessionId,
         name: text.trim(),
@@ -87,7 +90,7 @@ class DirectDialAssistant extends BaseAssistant {
 
   async onCallEnd(channel: any): Promise<void> {
     console.log(`[DirectDial][Session ${this.sessionId}] Call ended. Retries: ${this.retryManager.getCount()}`);
-    this.setState("idle" as AssistantState);
+    this.setState(AssistantState.IDLE);
   }
 }
 

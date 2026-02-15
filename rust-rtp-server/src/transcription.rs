@@ -90,7 +90,17 @@ pub async fn run_session(
                 }
 
                 // Drain any buffered audio during the reconnection gap
-                while audio_rx.try_recv().is_ok() {}
+                // and check if the session was removed (audio_tx dropped)
+                loop {
+                    match audio_rx.try_recv() {
+                        Ok(_) => continue,
+                        Err(mpsc::error::TryRecvError::Empty) => break,
+                        Err(mpsc::error::TryRecvError::Disconnected) => {
+                            tracing::info!("[{}] Audio channel closed, stopping transcription retries", session_id);
+                            return;
+                        }
+                    }
+                }
             }
         }
     }

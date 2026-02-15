@@ -4,34 +4,37 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "use": "nvm use",
-    "build": "node node_modules/typescript/bin/tsc",
-    "watch": "node node_modules/typescript/bin/tsc -w",
-    "clean": "node -e \"const keep=['rtp-udp-server.js'];require('fs').readdirSync('core').filter(f=>f.endsWith('.js')&&!keep.includes(f)).forEach(f=>require('fs').unlinkSync('core/'+f));const tkeep=['google-speech-provider.js','build-rtp.js'];require('fs').readdirSync('tools').filter(f=>f.endsWith('.js')&&!tkeep.includes(f)).forEach(f=>require('fs').unlinkSync('tools/'+f))\"",
+    "dev": "node tools/dev-launcher.cjs",
+    "build": "cd dashboard && npx nuxt build",
+    "start": "npm run build && cd dashboard && node .output/server/index.mjs",
+    "postinstall": "npm run dashboard:install",
+    "start:ivr": "DEFAULT_ASSISTANT=ivr-transfer npm run dev",
+    "start:dial": "DEFAULT_ASSISTANT=direct-dial npm run dev",
+    "start:autodialer": "DEFAULT_ASSISTANT=auto-dialer npm run dev",
     "build:rtp": "node tools/build-rtp.js",
-    "start": "npm run clean && node --no-deprecation -r ts-node/register/transpile-only core/manager.ts",
-    "start:ivr": "npm start -- --assistant ivr-transfer",
-    "start:dial": "npm start -- --assistant direct-dial",
-    "start:autodialer": "npm start -- --assistant auto-dialer",
-    "dev": "npm run watch"
+    "start:core": "npx tsx core/standalone.ts",
+    "dashboard:install": "cd dashboard && npm install",
+    "pro-setup": "npx tsx tools/pro-setup.ts"
   },
   "author": "Alexi Pawelec",
   "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
     "@aws-sdk/client-transcribe-streaming": "^3.354.0",
     "@google-cloud/speech": "^7.0.1",
+    "@types/ssh2": "^1.15.5",
     "ari-client": "^2.2.0",
+    "better-sqlite3": "^12.6.2",
     "chalk": "^5.4.1",
     "dotenv": "^17.2.4",
-    "express": "^5.1.0",
     "moment": "^2.29.4",
     "socket.io": "^4.6.2",
+    "ssh2": "^1.17.0",
     "ws": "^8.13.0"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/ws": "^8.5.5",
-    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.8.3"
   }
 }

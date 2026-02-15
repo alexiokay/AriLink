@@ -1,5 +1,7 @@
 {
   "name": "AutoDialerCallAssistant",
+  "description": "Outbound campaign assistant \u2014 plays a message, waits for DTMF confirmation, and transfers interested callers.",
+  "mode": "outbound",
   "language": "en-US",
   "prompts": {
     "welcome": "custom/autodialer_welcome",
@@ -20,5 +22,6 @@
   "campaign": {
     "maxConcurrent": 1,
     "trunk": ""
-  }
+  },
+  "flow": "flowchart TD\n    A([Outbound Call]) --> B{Callee answers?}\n    B -->|No answer| C([Result: no_answer])\n    B -->|Answered| D[/Play autodialer_welcome/]\n    D --> E{Wait for DTMF<br/>15s timeout}\n    E -->|Press 1| F([Transfer to destination<br/>Result: transferred])\n    E -->|Wrong key| E\n    E -->|Timeout| G[/Play goodbye/]\n    G --> H([Hangup<br/>Result: no_interest])"
 }

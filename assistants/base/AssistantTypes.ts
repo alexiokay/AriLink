@@ -8,6 +8,7 @@ export enum AssistantState {
 
 export interface AssistantConfig {
   name: string;
+  mode?: "incoming" | "outbound";
   language: string;
   prompts: {
     welcome: string;
@@ -20,7 +21,10 @@ export interface AssistantConfig {
     maxRetries: number;
     timeoutSeconds: number;
     silenceThresholdSeconds: number;
-    [key: string]: any;
+    transferDigit?: string;
+    maxNoMatches?: number;
+    tryAgainInterval?: number;
+    [key: string]: unknown;
   };
   transfer?: {
     destination: string;

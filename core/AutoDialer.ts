@@ -4,7 +4,6 @@ const path = require("path");
 
 require("dotenv").config({ path: path.resolve(__dirname, "../.env"), quiet: true });
 
-const { AssistantFactory } = require("./AssistantFactory");
 const { sessionManager } = require("./CallSession");
 
 interface PhoneListEntry {
@@ -22,15 +21,22 @@ interface CallResult {
 
 type CampaignStatus = "idle" | "running" | "paused" | "completed";
 
+interface AutoDialerOptions {
+  name?: string;
+  assistantSlug?: string;
+  maxConcurrent?: number;
+  callerId?: string;
+}
+
 /**
  * AutoDialer - Campaign Engine
  *
  * Reads a phone list and originates outbound calls via ARI.
- * Each call is handled by an AutoDialerCallAssistant.
+ * Each call is handled by the selected assistant (defaults to auto-dialer-call).
  *
  * Usage:
- *   const dialer = new AutoDialer(ariClient);
- *   dialer.loadPhoneList("./tools/phone-list.json");
+ *   const dialer = new AutoDialer(ariClient, { name: "March Outreach", assistantSlug: "auto-dialer-call" });
+ *   dialer.setPhoneList([{ phone: "123", name: "John" }]);
  *   dialer.start();
  */
 class AutoDialer extends EventEmitter {
@@ -41,27 +47,38 @@ class AutoDialer extends EventEmitter {
   private activeCalls: number = 0;
   private maxConcurrent: number;
   private status: CampaignStatus = "idle";
+  private name: string;
+  private assistantSlug: string;
   private audioFile: string;
   private trunkName: string;
   private callerId: string;
+  private activeChannels: Set<any> = new Set();
+  private cleanedSessions: Set<string> = new Set();
 
-  constructor(client: any) {
+  constructor(client: any, options?: AutoDialerOptions) {
     super();
     this.client = client;
+    this.name = options?.name || "";
+    this.assistantSlug = options?.assistantSlug || "auto-dialer-call";
 
-    // Load config from auto-dialer-call assistant config.json, fall back to env vars
+    // Load config from selected assistant's config.json, fall back to auto-dialer-call, then env vars
     let assistantConfig: any = {};
     try {
-      assistantConfig = require("../assistants/auto-dialer-call/config.json");
-    } catch { /* config not found, use env vars */ }
+      assistantConfig = require(`../assistants/${this.assistantSlug}/config.json`);
+    } catch {
+      try {
+        assistantConfig = require("../assistants/auto-dialer-call/config.json");
+      } catch { /* config not found, use env vars */ }
+    }
 
-    this.maxConcurrent = assistantConfig.campaign?.maxConcurrent
+    this.maxConcurrent = options?.maxConcurrent
+      || assistantConfig.campaign?.maxConcurrent
       || parseInt(process.env.AUTODIALER_MAX_CONCURRENT || "1", 10);
     this.audioFile = assistantConfig.prompts?.welcome
       || process.env.AUTODIALER_AUDIO || "custom/autodialer_welcome";
     this.trunkName = assistantConfig.campaign?.trunk
       || process.env.AUTODIALER_TRUNK || process.env.TRANSFER_TRUNK || "from-internal";
-    this.callerId = process.env.FROM_NUMBER || "unknown";
+    this.callerId = options?.callerId || process.env.FROM_NUMBER || "unknown";
   }
 
   /**
@@ -101,7 +118,7 @@ class AutoDialer extends EventEmitter {
     }
 
     this.status = "running";
-    console.log(`[AutoDialer] Campaign started. ${this.phoneList.length} numbers, max ${this.maxConcurrent} concurrent`);
+    console.log(`[AutoDialer] Campaign "${this.name || "unnamed"}" started. ${this.phoneList.length} numbers, max ${this.maxConcurrent} concurrent, assistant: ${this.assistantSlug}`);
     this.emit("campaignStarted", { total: this.phoneList.length });
 
     this.fillSlots();
@@ -132,8 +149,21 @@ class AutoDialer extends EventEmitter {
    * Stop the campaign entirely
    */
   stop(): void {
+    if (this.status === "completed") return;
+    
     this.status = "completed";
-    console.log(`[AutoDialer] Campaign stopped. ${this.results.length}/${this.phoneList.length} processed`);
+    console.log(`[AutoDialer] Campaign STOPPED manually. Hanging up ${this.activeChannels.size} active calls.`);
+    
+    // Hard stop: hang up all active channels
+    for (const channel of this.activeChannels) {
+      try {
+        channel.hangup();
+      } catch (err) {
+        // Ignored
+      }
+    }
+    this.activeChannels.clear();
+
     this.saveResults();
     this.emit("campaignComplete", { results: this.results });
   }
@@ -141,13 +171,15 @@ class AutoDialer extends EventEmitter {
   /**
    * Get campaign status
    */
-  getStatus(): { status: CampaignStatus; progress: number; total: number; activeCalls: number; results: CallResult[] } {
+  getStatus(): { status: CampaignStatus; progress: number; total: number; activeCalls: number; results: CallResult[]; name: string; assistantSlug: string } {
     return {
       status: this.status,
       progress: this.currentIndex,
       total: this.phoneList.length,
       activeCalls: this.activeCalls,
       results: this.results,
+      name: this.name,
+      assistantSlug: this.assistantSlug,
     };
   }
 
@@ -187,21 +219,19 @@ class AutoDialer extends EventEmitter {
 
     console.log(`[AutoDialer][${sessionId}] Dialing ${phone} (${name || "unknown"}) [${this.activeCalls}/${this.maxConcurrent} active]`);
 
-    const endpoint = `PJSIP/${phone}@${this.trunkName}`;
+    const endpoint = `Local/${phone}@${this.trunkName}`;
 
     try {
+      // appArgs: campaign,sessionId,assistantSlug,callerId,phone,name
+      // AriControllerServer detects "campaign" and runs the full audio pipeline
+      const encodedName = encodeURIComponent(name || "");
       this.client.channels.originate(
         {
           endpoint,
           app: appName,
           callerId: this.callerId,
-          appArgs: `dialed,autodialer,${sessionId}`,
+          appArgs: `campaign,${sessionId},${this.assistantSlug},${this.callerId},${phone},${encodedName}`,
           timeout: 30,
-          headers: {
-            "X-Session-ID": sessionId,
-            "X-AutoDialer": "true",
-            "X-Phone": phone,
-          },
         },
         (err: any, channel: any) => {
           if (err) {
@@ -227,117 +257,61 @@ class AutoDialer extends EventEmitter {
   }
 
   /**
-   * Set up event handlers for an outbound auto-dialer call
+   * Track lifecycle of a campaign call.
+   * Session, bridge, assistant, and audio pipeline are all created by
+   * AriControllerServer.handleCampaignCall() via the global stasisStart handler.
+   * AutoDialer only tracks: channel (for Stop), results, and active call count.
    */
-  private async setupOutboundCall(sessionId: string, entry: PhoneListEntry, channel: any): Promise<void> {
+  private setupOutboundCall(sessionId: string, entry: PhoneListEntry, channel: any): void {
     const callStartTime = Date.now();
+    let resultRecorded = false;
 
-    // When the dialed party answers and enters Stasis
-    channel.on("StasisStart", async (event: any, answeredChannel: any) => {
-      console.log(`[AutoDialer][${sessionId}] ${entry.phone} answered`);
-
-      // Create a bridge for this call
-      try {
-        const bridge = await this.client.bridges.create({ type: "mixing" });
-
-        // Create session in session manager
-        const session = sessionManager.createSession(sessionId, bridge, answeredChannel);
-
-        // Add channel to bridge
-        bridge.addChannel({ channel: answeredChannel.id }, (err: any) => {
-          if (err) console.error(`[AutoDialer][${sessionId}] Bridge error:`, err);
-        });
-
-        // Create assistant for this call
-        const assistant = AssistantFactory.createByType("auto-dialer-call", this.client, sessionId);
-        sessionManager.setAssistant(sessionId, assistant);
-
-        // Listen for transfer events
-        // Priority: assistant config.json > .env vars
-        assistant.on("transferToDestination", async (data: any) => {
-          const config = assistant.getConfig();
-          const destination = config.transfer?.destination || process.env.TRANSFER_DESTINATION;
-          const trunk = config.transfer?.trunk || process.env.TRANSFER_TRUNK;
-
-          if (!destination || !trunk) {
-            console.error(`[AutoDialer][${sessionId}] Transfer not configured (set transfer in config.json or TRANSFER_DESTINATION/TRANSFER_TRUNK in .env)`);
-            return;
-          }
-
-          console.log(`[AutoDialer][${sessionId}] Transferring ${entry.phone} to ${destination}`);
-
-          // Originate to transfer destination and bridge
-          const transferEndpoint = `PJSIP/${destination}@${trunk}`;
-          this.client.channels.originate(
-            {
-              endpoint: transferEndpoint,
-              app: process.env.STASIS_APP_NAME || "stasis-app",
-              callerId: this.callerId,
-              appArgs: "dialed",
-            },
-            (err: any, transferChannel: any) => {
-              if (err) {
-                console.error(`[AutoDialer][${sessionId}] Transfer failed:`, err);
-                return;
-              }
-
-              transferChannel.on("StasisStart", (event: any, outChannel: any) => {
-                bridge.addChannel({ channel: outChannel.id }, (err: any) => {
-                  if (err) console.error(`[AutoDialer][${sessionId}] Bridge add error:`, err);
-                  else console.log(`[AutoDialer][${sessionId}] Bridged to ${destination}`);
-                });
-                sessionManager.setOutgoingChannel(sessionId, outChannel);
-              });
-            }
-          );
-        });
-
-        // Listen for call result
-        assistant.on("callResult", (data: { result: string }) => {
-          this.recordResult(entry, data.result as CallResult["result"], Date.now() - callStartTime);
-        });
-
-        // Let assistant handle the call
-        await assistant.onCallStart(answeredChannel, entry.phone, entry.phone);
-
-      } catch (err: any) {
-        console.error(`[AutoDialer][${sessionId}] Error setting up call:`, err.message);
-        this.recordResult(entry, "failed");
-      }
-    });
+    // Track channel so we can hang it up on "Stop"
+    this.activeChannels.add(channel);
 
     // Channel destroyed before answering (busy, no answer, etc.)
-    channel.on("ChannelDestroyed", (event: any) => {
-      // Only record if no session exists (call wasn't answered)
-      const session = sessionManager.getSession(sessionId);
-      if (!session) {
-        const cause = event.cause_txt || "unknown";
-        console.log(`[AutoDialer][${sessionId}] ${entry.phone} not answered: ${cause}`);
-
-        if (cause.includes("BUSY")) {
-          this.recordResult(entry, "busy");
-        } else {
+    channel.on("ChannelDestroyed", () => {
+      if (!resultRecorded) {
+        const session = sessionManager.getSession(sessionId);
+        if (!session) {
+          // No session means call was never answered
+          console.log(`[AutoDialer][${sessionId}] ${entry.phone} not answered`);
+          resultRecorded = true;
           this.recordResult(entry, "no_answer");
         }
       }
+      this.cleanupCall(sessionId, channel);
     });
 
-    // StasisEnd - call left Stasis (hangup)
-    channel.on("StasisEnd", async () => {
+    // StasisEnd — call left Stasis (hangup after being answered)
+    channel.on("StasisEnd", () => {
       console.log(`[AutoDialer][${sessionId}] ${entry.phone} StasisEnd`);
 
-      const session = sessionManager.getSession(sessionId);
-      if (session) {
-        const assistant = sessionManager.getAssistant(sessionId);
-        if (assistant) {
-          await assistant.onCallEnd(channel);
-        }
-        await sessionManager.endSession(sessionId);
+      if (!resultRecorded) {
+        resultRecorded = true;
+        // Check if the assistant recorded a specific result (e.g. "transferred")
+        const session = sessionManager.getSession(sessionId);
+        const specificResult = session ? (session as any).campaignResult : undefined;
+        this.recordResult(entry, specificResult || "answered", Date.now() - callStartTime);
       }
 
-      this.activeCalls--;
-      this.fillSlots();
+      this.cleanupCall(sessionId, channel);
     });
+  }
+
+  /**
+   * Universal cleanup for a call session. 
+   * Ensures activeCalls is decremented exactly once and triggers fillSlots.
+   */
+  private cleanupCall(sessionId: string, channel: any): void {
+    if (this.cleanedSessions.has(sessionId)) return;
+    this.cleanedSessions.add(sessionId);
+
+    this.activeChannels.delete(channel);
+    this.activeCalls--;
+    
+    // Use nextTick to avoid potential recursion if fillSlots starts new calls immediately
+    process.nextTick(() => this.fillSlots());
   }
 
   /**
@@ -371,7 +345,8 @@ class AutoDialer extends EventEmitter {
       }
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const filePath = path.join(resultsDir, `campaign-${timestamp}.json`);
+      const safeName = this.name ? this.name.replace(/[^a-z0-9]+/gi, "-").substring(0, 30) + "-" : "";
+      const filePath = path.join(resultsDir, `campaign-${safeName}${timestamp}.json`);
 
       const counts: Record<string, number> = {};
       for (const r of this.results) {
@@ -379,6 +354,8 @@ class AutoDialer extends EventEmitter {
       }
 
       const report = {
+        campaignName: this.name,
+        assistantSlug: this.assistantSlug,
         campaignDate: new Date().toISOString(),
         totalNumbers: this.phoneList.length,
         totalProcessed: this.results.length,

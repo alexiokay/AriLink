@@ -1,0 +1,26 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+html {
+  font-size: 20px;
+}
+
+/* Tailwind v4 removed automatic cursor:pointer — restore it for interactive elements */
+button,
+[role="button"],
+select,
+a[href],
+input[type="checkbox"],
+input[type="radio"],
+summary {
+  cursor: pointer;
+}
+
+/* Smooth color mode transition on toggle */
+html.color-mode-transition,
+html.color-mode-transition *,
+html.color-mode-transition *::before,
+html.color-mode-transition *::after {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.15s ease !important;
+  transition-delay: 0s !important;
+}

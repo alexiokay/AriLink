@@ -3,7 +3,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8.3-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-23.x-green.svg)](https://nodejs.org/)
 [![Asterisk](https://img.shields.io/badge/Asterisk-ARI-red.svg)](https://wiki.asterisk.org/wiki/display/AST/Asterisk+REST+Interface+(ARI))
-[![License: Non-Commercial](https://img.shields.io/badge/License-Non--Commercial-orange.svg)](LICENSE)
+[![License: ACL v1.0](https://img.shields.io/badge/License-ACL--1.0-orange.svg)](LICENSE)
 
 <p align="center">
   <!-- Replace with your own logo when available -->
@@ -62,26 +62,15 @@ The main controller that interfaces with Asterisk PBX:
 </details>
 
 <details>
-<summary><b>🔤 AriTranscriberServer</b></summary>
+<summary><b>📡 Rust RTP Server</b></summary>
 <p>
 
-Provides real-time speech transcription:
-- Connects to configurable transcription services (local or cloud)
-- Processes RTP audio streams
-- Transmits transcription results via WebSockets
-- Supports customizable language and model settings
-- Automatic fallback to backup services on failure
-
-</p>
-</details>
-
-<details>
-<summary><b>📡 RTP UDP Server</b></summary>
-<p>
-
-Handles the real-time audio streaming:
-- Processes incoming RTP packets from Asterisk
-- Handles audio format conversion for transcription
+High-performance audio pipeline (replaces legacy Node.js RTP/transcription):
+- Receives RTP audio from Asterisk ExternalMedia channels
+- Per-session audio routing with codec handling (slin16)
+- Forwards audio to configurable transcription services (Parakeet, Google Cloud Speech)
+- Automatic fallback between transcription providers
+- WebSocket bridge for real-time transcription results
 
 </p>
 </details>
@@ -127,55 +116,39 @@ The system uses environment variables for configuration, including:
    irm https://astral.sh/uv/install.ps1 | iex
    ```
 
-### Installation
+### Installation & Startup
 
-1. **Setup Transcription Service** (local speech recognition):
-
-   **Parakeet (Recommended - fastest):**
+1. **Clone and Install everything** (One command for all Node dependencies):
    ```bash
-   cd transcription-services/parakeet-service
-   uv venv
-   uv pip install -r requirements.txt
+   npm install
    ```
+   > [!TIP]
+   > This automatically installs both the core server and the interactive dashboard dependencies.
 
-   **OR Whisper (alternative):**
+2. **Setup Transcription Service** (Local speech recognition):
+   Choose one and install its dependencies (requires [UV](https://astral.sh/uv/)):
    ```bash
-   cd transcription-services/whisper-service
-   uv venv
-   uv pip install -r requirements.txt
+   # For Parakeet (Recommended)
+   cd transcription-services/parakeet-service && uv pip install -r requirements.txt
+   
+   # OR for Whisper
+   cd transcription-services/whisper-service && uv pip install -r requirements.txt
    ```
 
-2. **Configure environment variables** in `.env` file:
-   ```env
-   TRANSCRIPTION_SERVICES=ws://localhost:5000
-   ```
-   See [`.env.example`](.env.example) for all options and fallback configuration.
-
-3. **Configure contacts** in `tools/contacts.json` for voice-activated dialing
-
-### Running the System
-
-1. **Start Transcription Service** (in terminal 1):
-
-   For Parakeet:
+3. **Start the system**:
    ```bash
-   cd transcription-services/parakeet-service
-   start-service.bat
+   # Terminal 1: AI Service
+   cd transcription-services/parakeet-service && ./start-service.bat
+   
+   # Terminal 2: AriLink (Choose one mode)
+   npm run dev   # Best for development (Live Reload)
+   npm start     # Best for production (Builds & Starts)
    ```
 
-   OR for Whisper:
-   ```bash
-   cd transcription-services/whisper-service
-   start-service.bat
-   ```
-   First run will download the model (~800MB for Whisper, ~600MB for Parakeet)
-
-2. **Start AriLink Server** (in terminal 2):
-   ```bash
-   npm start
-   ```
-
-See [Transcription Services Guide](docs/TRANSCRIPTION-SERVICES.md) for all configuration options including fallbacks.
+### ⚙️ Configuration
+The system uses a central `.env` file. You can manage this via the **Config** page in the dashboard once the server is running.
+- See [`.env.example`](.env.example) for manual setup.
+- Configure contacts in `tools/contacts.json` for voice-activated dialing.
 
 ## 💡 Use Cases
 
@@ -207,7 +180,7 @@ See [Transcription Services Guide](docs/TRANSCRIPTION-SERVICES.md) for all confi
   - Cloud: Google Cloud Speech API credentials (optional)
 - Various NPM packages including:
   ```
-  ari-client, @google-cloud/speech, ws, express, dotenv
+  ari-client, @google-cloud/speech, ws, socket.io, dotenv, better-sqlite3
   ```
 
 ## 🔮 Future Improvements
@@ -221,18 +194,19 @@ See [Transcription Services Guide](docs/TRANSCRIPTION-SERVICES.md) for all confi
 
 ## 📜 License
 
-This project is licensed under a **Non-Commercial License (MIT-Based)** - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **AriLink Community License (ACL) v1.0** - see the [LICENSE](LICENSE) file for details.
 
 ### Summary
 
-- ✅ **Free for non-commercial use** - Use, modify, and distribute for personal and educational purposes
-- 💼 **Commercial use requires permission** - Contact for commercial licensing
-- 📧 **Get in touch**: Discord: `alexispace`
+- ✅ **Free for personal & internal use** - View, study, and modify for personal/internal use.
+- 💼 **Commercial use restricted** - Internal commercial operations allowed; no redistribution or SaaS.
+- 🚫 **No Redistribution** - You may not redistribute, white-label, or sell the software.
+- 📧 **Commercial Licensing**: For SaaS hosting, resale, or third-party deployment, contact Alexi Pawelec (Discord: `alexispace`).
 
 **Key Points:**
-- The software is provided "as is" without warranty
-- Attribution is required in all copies
-- Commercial use requires explicit permission from the copyright holder
+- The software is provided "as is" without warranty.
+- Contributions grant the copyright holder perpetual rights to use/modify.
+- Violation of terms automatically terminates the license.
 
 For the full license text, please refer to the [LICENSE](LICENSE) file.
 

@@ -7,7 +7,6 @@ yarn-error.log*
 lerna-debug.log*
 .pnpm-debug.log*
 core/*.js
-!core/rtp-udp-server.js
 tools/*.js
 !tools/google-speech-provider.js
 !tools/build-rtp.js
@@ -15,8 +14,22 @@ tools/*.js
 # Zig toolchain (downloaded locally, ~40MB)
 tools/zig-*/
 assistants/**/*.js
+
+# Dashboard build output
+dashboard/.output/
+dashboard/.nuxt/
+dashboard/node_modules/
+
+# Call history database
+data/
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Campaign results (runtime data)
+campaign-results/
+
+# Contact lists (user data)
+contact-lists/
 
 # Runtime data
 pids
@@ -100,6 +113,12 @@ web_modules/
 .env.production.local
 .env.local
 
+# Pro Pack (private — stub is in public repo)
+tools/pro-setup.full.ts
+tools/generate-license.ts
+core/AutoConfigure.ts
+*.pem
+
 # Claude Code project memory
 .claude/
 
@@ -162,3 +181,6 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
+
+# Windows artifact
+nul

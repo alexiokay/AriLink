@@ -1,8 +1,10 @@
 const { BaseAssistant } = require("../base/BaseAssistant");
 const { ContactMatcher } = require("../../tools/ContactMatcher");
 const { RetryManager } = require("../../tools/RetryManager");
+const { AssistantState } = require("../base/AssistantTypes");
 
-import type { AssistantConfig, AssistantState } from "../base/AssistantTypes";
+import type { AssistantConfig } from "../base/AssistantTypes";
+import type { ContactsData } from "../../tools/ContactMatcher";
 
 const ivrConfig: AssistantConfig = require("./config.json");
 
@@ -23,11 +25,10 @@ const ivrConfig: AssistantConfig = require("./config.json");
  */
 class IvrTransferAssistant extends BaseAssistant {
   private callerName: string = "";
-  private transferInitiated: boolean = false;
   private contactMatcher: InstanceType<typeof ContactMatcher>;
   private retryManager: InstanceType<typeof RetryManager>;
 
-  constructor(client: any, sessionId: string, contacts?: any) {
+  constructor(client: any, sessionId: string, contacts?: ContactsData) {
     super(ivrConfig, client, sessionId);
     this.contactMatcher = new ContactMatcher(contacts);
     this.retryManager = new RetryManager({
@@ -45,40 +46,27 @@ class IvrTransferAssistant extends BaseAssistant {
     console.log(`[IvrTransfer][Session ${this.sessionId}] Call started from ${callerId} on ext ${extension}`);
 
     // Play welcome message: "Welcome. Press 1."
-    this.setState("speaking" as AssistantState);
-
-    try {
-      await this.playAudio(this.config.prompts.welcome);
-    } catch (err) {
-      // Fallback to built-in sound if custom not available
-      console.warn(`[IvrTransfer] Custom welcome not found, using fallback`);
-      await this.playAudio("hello-world");
-    }
+    this.setState(AssistantState.SPEAKING);
+    await this.playAudioWithFallback(this.config.prompts.welcome, "hello-world");
 
     // Now waiting for DTMF "1"
-    this.setState("listening" as AssistantState);
+    this.setState(AssistantState.LISTENING);
     this.playAudioNoWait("beep");
   }
 
   async onDTMFInput(digit: string): Promise<void> {
     console.log(`[IvrTransfer][Session ${this.sessionId}] DTMF: ${digit} (state: ${this.state})`);
 
-    if (this.state === "listening" && digit === "1") {
+    if (this.isState(AssistantState.LISTENING) && digit === "1") {
       // User pressed 1 → prompt for name
-      this.setState("speaking" as AssistantState);
-
-      try {
-        await this.playAudio(this.config.prompts.speakName);
-      } catch (err) {
-        console.warn(`[IvrTransfer] Custom speak-name prompt not found, using fallback`);
-        await this.playAudio("beep");
-      }
+      this.setState(AssistantState.SPEAKING);
+      await this.playAudioWithFallback(this.config.prompts.speakName, "beep");
 
       // Now waiting for voice input (name)
-      this.setState("processing" as AssistantState);
+      this.setState(AssistantState.PROCESSING);
       this.playAudioNoWait("beep");
 
-    } else if (this.state === "listening") {
+    } else if (this.isState(AssistantState.LISTENING)) {
       // Wrong key pressed
       this.playAudioNoWait("beep");
       this.retryManager.attempt();
@@ -87,7 +75,7 @@ class IvrTransferAssistant extends BaseAssistant {
 
   async onTranscription(text: string, isFinal: boolean): Promise<void> {
     // Only process transcription when we're waiting for a name
-    if (this.state !== "processing") {
+    if (!this.isState(AssistantState.PROCESSING)) {
       return;
     }
 
@@ -95,8 +83,7 @@ class IvrTransferAssistant extends BaseAssistant {
 
     // IMMEDIATE TRANSFER: Don't wait for final result
     // Transfer as soon as we have a substantial transcription (3+ chars)
-    if (!this.transferInitiated && text.trim().length >= 3) {
-      this.transferInitiated = true;
+    if (text.trim().length >= 3) {
       this.callerName = text.trim();
 
       console.log(`[IvrTransfer][Session ${this.sessionId}] Name captured: "${this.callerName}" → Initiating transfer`);
@@ -110,7 +97,7 @@ class IvrTransferAssistant extends BaseAssistant {
           name: this.callerName,
           number: matchedNumber,
         });
-        this.setState("transferring" as AssistantState);
+        this.setState(AssistantState.TRANSFERRING, matchedNumber);
         return;
       }
 
@@ -120,13 +107,13 @@ class IvrTransferAssistant extends BaseAssistant {
         callerName: this.callerName,
       });
 
-      this.setState("transferring" as AssistantState);
+      this.setState(AssistantState.TRANSFERRING, "destination");
     }
   }
 
   async onCallEnd(channel: any): Promise<void> {
     console.log(`[IvrTransfer][Session ${this.sessionId}] Call ended. Caller name: "${this.callerName}"`);
-    this.setState("idle" as AssistantState);
+    this.setState(AssistantState.IDLE);
   }
 }
 

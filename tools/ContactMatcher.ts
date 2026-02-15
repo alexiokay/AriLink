@@ -20,8 +20,8 @@ interface ContactsData {
 class ContactMatcher {
   private contacts: ContactsData | null;
 
-  constructor(contacts: any) {
-    this.contacts = contacts;
+  constructor(contacts: ContactsData | undefined) {
+    this.contacts = contacts ?? null;
   }
 
   /**
@@ -58,3 +58,4 @@ class ContactMatcher {
 }
 
 module.exports.ContactMatcher = ContactMatcher;
+export type { Contact, ContactsData };

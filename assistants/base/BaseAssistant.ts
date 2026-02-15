@@ -1,10 +1,11 @@
 const EventEmitter = require("events");
+const { AssistantState: _AssistantState } = require("./AssistantTypes");
 
 import type { IAssistant, AssistantConfig, AssistantState } from "./AssistantTypes";
 
 abstract class BaseAssistant extends EventEmitter implements IAssistant {
   protected config: AssistantConfig;
-  protected state: string = "idle"; // AssistantState.IDLE
+  protected state: AssistantState = _AssistantState.IDLE;
   protected channel: any;
   protected client: any; // ARI client reference
   protected sessionId: string;
@@ -40,6 +41,13 @@ abstract class BaseAssistant extends EventEmitter implements IAssistant {
 
     return new Promise((resolve, reject) => {
       const startTime = Date.now();
+      let started = false;
+      let settled = false;
+      let startTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const cleanup = () => {
+        if (startTimer) { clearTimeout(startTimer); startTimer = null; }
+      };
 
       this.channel.play(
         { media: `sound:${audioFile}` },
@@ -50,12 +58,32 @@ abstract class BaseAssistant extends EventEmitter implements IAssistant {
           }
           console.log(`[${this.config.name}] Playing: ${audioFile}`);
 
+          // Safety net: if PlaybackStarted never fires within 3s, the file
+          // is missing and Asterisk silently dropped the playback.
+          // This is NOT a playback duration limit — real audio can be any length.
+          startTimer = setTimeout(() => {
+            if (!started && !settled) {
+              settled = true;
+              console.warn(`[${this.config.name}] No PlaybackStarted for ${audioFile} after 3s — file likely missing`);
+              reject(new Error(`Playback never started: ${audioFile}`));
+            }
+          }, 3000);
+
+          playback.once("PlaybackStarted", () => {
+            started = true;
+            if (startTimer) { clearTimeout(startTimer); startTimer = null; }
+          });
+
           playback.once("PlaybackFinished", () => {
+            cleanup();
+            if (settled) return;
+            settled = true;
+
             const duration = Date.now() - startTime;
             console.log(`[${this.config.name}] Finished: ${audioFile} (${duration}ms)`);
 
-            // If playback finished in less than 100ms, the file likely doesn't exist
-            // Even the shortest audio files take longer than this to play
+            // No real audio file plays in under 100ms — file is missing, empty, or corrupt.
+            // Asterisk sometimes sends PlaybackStarted+PlaybackFinished instantly for broken files.
             if (duration < 100) {
               return reject(new Error(`Audio file not found or failed to play: ${audioFile}`));
             }
@@ -87,7 +115,7 @@ abstract class BaseAssistant extends EventEmitter implements IAssistant {
 
   async transferCall(endpoint: string): Promise<void> {
     console.log(`[${this.config.name}] Transferring to ${endpoint}`);
-    this.setState("transferring" as AssistantState);
+    this.setState(_AssistantState.TRANSFERRING, endpoint);
     this.emit("transfer", { endpoint, sessionId: this.sessionId });
   }
 
@@ -104,13 +132,27 @@ abstract class BaseAssistant extends EventEmitter implements IAssistant {
   }
 
   getState(): AssistantState {
-    return this.state as AssistantState;
+    return this.state;
   }
 
-  setState(state: AssistantState): void {
+  setState(state: AssistantState, detail?: string): void {
     const prev = this.state;
-    this.state = state as string;
-    console.log(`[${this.config.name}][Session ${this.sessionId}] State: ${prev} → ${state}`);
+    this.state = state;
+    console.log(`[${this.config.name}][Session ${this.sessionId}] State: ${prev} → ${state}${detail ? ` (${detail})` : ""}`);
+    this.emit("stateChange", { sessionId: this.sessionId, prev, state, detail });
+  }
+
+  protected async playAudioWithFallback(primary: string, fallback: string): Promise<void> {
+    try {
+      await this.playAudio(primary);
+    } catch {
+      console.warn(`[${this.config.name}] ${primary} not found, using fallback: ${fallback}`);
+      await this.playAudio(fallback);
+    }
+  }
+
+  protected isState(...states: AssistantState[]): boolean {
+    return states.includes(this.state);
   }
 
   destroy(): void {
