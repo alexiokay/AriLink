@@ -5,8 +5,8 @@
   "main": "index.js",
   "scripts": {
     "dev": "node tools/dev-launcher.cjs",
-    "build": "cd dashboard && npx nuxt build",
-    "start": "npm run build && cd dashboard && node .output/server/index.mjs",
+    "build": "node tools/build-launcher.cjs",
+    "start": "node tools/start-launcher.cjs",
     "postinstall": "npm run dashboard:install",
     "start:ivr": "DEFAULT_ASSISTANT=ivr-transfer npm run dev",
     "start:dial": "DEFAULT_ASSISTANT=direct-dial npm run dev",

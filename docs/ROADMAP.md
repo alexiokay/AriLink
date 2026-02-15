@@ -541,3 +541,94 @@ Built incrementally across phases:
 | 6 — Platform expansion | High | Strategic | SaaS |
 
 Each phase is independently useful and demo-worthy. Phase 1 can ship fast and produce compelling content immediately.
+
+---
+
+## One-Click Deployment & Transcription Management
+
+> Make ARILink deployable by anyone — from zero to running in minutes.
+
+### Deployment Strategy
+
+The app has 3 tiers of compute needs:
+
+| Component | Needs | Runs on... |
+|-----------|-------|------------|
+| **Dashboard + ARI logic** | Node.js, tiny CPU | Anything (Railway, Fly, VPS, Docker) |
+| **Rust RTP server** | Small binary, low CPU | Same box or sidecar container |
+| **Transcription** | GPU or cloud API | Cloud provider, RunPod, or local GPU |
+
+### One-Click Deploy Options
+
+**Option A: Cloud transcription only (simplest)**
+- Multi-stage Dockerfile: build Rust binary → bundle with Node.js
+- Deploy on Railway / Render / Fly.io with a single button
+- Transcription via cloud APIs only (Deepgram, Google Cloud Speech, AssemblyAI)
+- User sets env vars (API keys) — no GPU needed
+
+**Option B: Hybrid — cheap host + GPU transcription**
+- App on Railway/Render ($5/mo)
+- Parakeet on RunPod serverless (pay-per-second GPU, ~$0.00026/sec)
+- Connect via WebSocket URL in `TRANSCRIPTION_SERVICES` — already supported
+- Template: one-click RunPod serverless endpoint with Parakeet pre-configured
+
+**Option C: All-in-one Docker Compose on GPU VPS**
+- Single `docker-compose.yml` with all 3 services
+- Deploy on Lambda Labs, RunPod pods, Hetzner GPU
+- True self-hosted, zero cloud dependencies
+
+### Deliverables
+
+- [ ] Multi-stage `Dockerfile` (Rust build + Node.js + dashboard)
+- [ ] `docker-compose.yml` with all services
+- [ ] `railway.json` / `render.yaml` for one-click deploy buttons
+- [ ] Deploy button in README ("Deploy to Railway", "Deploy to Render")
+- [ ] RunPod serverless template for Parakeet transcription endpoint
+- [ ] `.env.example` with all options documented
+
+### Transcription Management GUI
+
+Dashboard page for managing transcription providers — local models, cloud APIs, and GPU hosting.
+
+```
+Dashboard → Settings → Transcription
+├── Cloud Providers
+│   ├── Google Cloud Speech  [API Key: ****] [Connected ✓]
+│   ├── Deepgram             [Add key...]
+│   └── AssemblyAI           [Add key...]
+├── Local Models
+│   ├── Parakeet TDT 0.6B   [Downloaded ✓] [Active] [Remove]
+│   ├── Whisper Large v3     [Download 3.1GB...]
+│   └── Whisper Medium       [Download 1.5GB...]
+├── GPU Providers
+│   ├── RunPod Serverless    [API Key: ****] [Configure...]
+│   └── Custom endpoint      [ws://...]
+└── Priority Order
+    1. Parakeet TDT 0.6B (local)     [↑↓]
+    2. Google Cloud Speech (fallback) [↑↓]
+```
+
+### Features
+
+- **Model registry** — list of supported models with size, language support, speed benchmarks
+- **Download manager** — download/remove local models with progress bar
+- **Cloud provider setup** — API key input, connection test, usage stats
+- **RunPod integration** — create/manage serverless GPU endpoints from the dashboard
+- **Priority ordering** — drag-and-drop to set primary/fallback transcription chain
+- **Auto-detection** — on first boot, detect available GPU/CPU and suggest optimal config
+- **Health monitoring** — real-time status of each provider (latency, error rate, availability)
+
+### How It Wires Together
+
+The GUI writes to `TRANSCRIPTION_SERVICES` env var format that already exists:
+```
+TRANSCRIPTION_SERVICES=ws://localhost:5000,ws://runpod-endpoint:5000,google
+```
+First = primary, rest = automatic fallbacks. No code changes needed in the transcription pipeline.
+
+### Implementation Notes
+
+- Model downloads go to a configurable `models/` directory (gitignored)
+- RunPod API: `POST /v2/{endpoint_id}/run` for serverless inference
+- Health checks: ping each provider on interval, update dashboard status badges
+- Auto-spawn: if local model selected and not running, Engine auto-starts it (existing pattern)

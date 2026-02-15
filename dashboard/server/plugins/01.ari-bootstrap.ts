@@ -15,6 +15,12 @@ const P = process as any;
 
 export default defineNitroPlugin(async (nitroApp) => {
 
+  // ── Skip during nuxt build — don't start Engine/Rust/Parakeet during prerendering ──
+  if (process.env.NUXT_BUILD === "true") {
+    console.log("[Bootstrap] Skipping engine during build");
+    return;
+  }
+
   // ── Idempotency: skip if already bootstrapped in this process ──
   if (P.__ariBootstrapped) {
     console.log("[Bootstrap] Already running in this process, skipping");

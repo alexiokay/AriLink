@@ -42,11 +42,17 @@ export default defineNuxtConfig({
         "ari-client",
         "@google-cloud/speech",
         "ws",
+        "ssh2",
+        "ssh2-sftp-client",
         "ai",
         "@ai-sdk/mistral",
         "@ai-sdk/vue",
         "zod",
       ],
+    },
+    // Direct Rollup externals — prevents Rollup from parsing native .node addons
+    rollupConfig: {
+      external: ["ssh2", "ssh2-sftp-client", /\.node$/],
     },
   },
 

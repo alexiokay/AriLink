@@ -83,8 +83,14 @@ class Engine extends EventEmitter {
     // Start Rust RTP server (if configured)
     await this.startRustRtp();
 
-    // Start Parakeet transcription service (if configured)
-    await this.startParakeet();
+    // Start Parakeet transcription service in the background (don't block engine startup)
+    this.startParakeet().then(() => {
+      if (this.dashboard) {
+        this.dashboard.updateServiceStatus("transcription", "connected", "Parakeet ready");
+      }
+    }).catch(() => {
+      // Errors already logged and dashboard updated inside startParakeet()
+    });
 
     // Create ARI controller
     const { AriControllerServer } = require("./AriControllerServer");
@@ -283,6 +289,18 @@ class Engine extends EventEmitter {
     });
   }
 
+  private async waitForTcpPort(host: string, port: number, timeoutMs: number): Promise<void> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const ready = await this.checkTcpPort(host, port);
+      if (ready) return;
+      const elapsed = Math.round((Date.now() - start) / 1000);
+      console.log(`[Engine] Waiting for Parakeet on port ${port}... (${elapsed}s)`);
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+    throw new Error(`Parakeet did not become ready within ${timeoutMs / 1000}s`);
+  }
+
   private async startParakeet(): Promise<void> {
     const autoStart = process.env.AUTO_START_TRANSCRIPTION === "true";
     if (!autoStart) return;
@@ -318,6 +336,25 @@ class Engine extends EventEmitter {
     const alreadyRunning = await this.checkTcpPort(probeHost, port);
     if (alreadyRunning) {
       console.log("[Engine] Parakeet transcription service already running, reusing");
+      return;
+    }
+
+    // If the launcher already pre-spawned Parakeet, just wait for it to become ready
+    if (process.env.PARAKEET_PRE_SPAWNED === "true") {
+      console.log("[Engine] Parakeet was pre-spawned by launcher, waiting for it to be ready...");
+      if (this.dashboard) {
+        this.dashboard.updateServiceStatus("transcription", "connecting", "Waiting for Parakeet...");
+      }
+      try {
+        await this.waitForTcpPort(probeHost, port, 90000);
+        console.log("[Engine] Parakeet transcription service is ready");
+      } catch (err: any) {
+        console.error(`[Engine] ${err.message}`);
+        console.error("[Engine] Continuing without Parakeet (start it manually)");
+        if (this.dashboard) {
+          this.dashboard.updateServiceStatus("transcription", "error", err.message);
+        }
+      }
       return;
     }
 
