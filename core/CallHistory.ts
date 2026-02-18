@@ -155,6 +155,78 @@ class CallHistory {
     ).all(callId);
   }
 
+  getMetrics(days = 7): {
+    totalCalls: number;
+    completedCalls: number;
+    failedCalls: number;
+    activeCalls: number;
+    averageDuration: number;
+    successRate: number;
+    dailyStats: { date: string; calls: number; avgDuration: number }[];
+    topAssistants: { assistant: string; count: number }[];
+    topCallers: { callerId: string; callerName: string; count: number }[];
+  } {
+    const totalCalls = this.db.prepare("SELECT COUNT(*) as c FROM calls").get().c;
+    const completedCalls = this.db.prepare("SELECT COUNT(*) as c FROM calls WHERE status = 'ended'").get().c;
+    const activeCalls = this.db.prepare("SELECT COUNT(*) as c FROM calls WHERE status = 'active'").get().c;
+    const failedCalls = totalCalls - completedCalls - activeCalls;
+
+    const avgRow = this.db.prepare(
+      "SELECT AVG(duration_sec) as avg FROM calls WHERE status = 'ended' AND duration_sec IS NOT NULL"
+    ).get();
+    const averageDuration = Math.round(avgRow.avg || 0);
+
+    const successRate = totalCalls > 0
+      ? Math.round((completedCalls / totalCalls) * 10000) / 100
+      : 0;
+
+    // Daily stats for last N days
+    const dailyStats = this.db.prepare(`
+      SELECT date(start_time) as date,
+             COUNT(*) as calls,
+             COALESCE(AVG(duration_sec), 0) as avgDuration
+      FROM calls
+      WHERE start_time >= date('now', ?)
+      GROUP BY date(start_time)
+      ORDER BY date ASC
+    `).all(`-${days} days`).map((r: any) => ({
+      date: r.date,
+      calls: r.calls,
+      avgDuration: Math.round(r.avgDuration),
+    }));
+
+    // Top assistants
+    const topAssistants = this.db.prepare(`
+      SELECT COALESCE(assistant_name, assistant, 'unknown') as assistant, COUNT(*) as count
+      FROM calls
+      GROUP BY assistant
+      ORDER BY count DESC
+      LIMIT 5
+    `).all();
+
+    // Top callers
+    const topCallers = this.db.prepare(`
+      SELECT caller_id as callerId, COALESCE(caller_name, caller_id) as callerName, COUNT(*) as count
+      FROM calls
+      WHERE caller_id IS NOT NULL AND caller_id != ''
+      GROUP BY caller_id
+      ORDER BY count DESC
+      LIMIT 5
+    `).all();
+
+    return {
+      totalCalls,
+      completedCalls,
+      failedCalls,
+      activeCalls,
+      averageDuration,
+      successRate,
+      dailyStats,
+      topAssistants,
+      topCallers,
+    };
+  }
+
   close() {
     this.db.close();
   }

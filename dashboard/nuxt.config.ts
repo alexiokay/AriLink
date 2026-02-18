@@ -48,6 +48,7 @@ export default defineNuxtConfig({
         "@ai-sdk/mistral",
         "@ai-sdk/vue",
         "zod",
+        "@modelcontextprotocol/sdk",
       ],
     },
     // Direct Rollup externals — prevents Rollup from parsing native .node addons

@@ -19,7 +19,7 @@
   "author": "Alexi Pawelec",
   "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
-    "@aws-sdk/client-transcribe-streaming": "^3.354.0",
+    "@aws-sdk/client-transcribe-streaming": "^3.992.0",
     "@google-cloud/speech": "^7.0.1",
     "@types/ssh2": "^1.15.5",
     "ari-client": "^2.2.0",
@@ -30,6 +30,9 @@
     "socket.io": "^4.6.2",
     "ssh2": "^1.17.0",
     "ws": "^8.13.0"
+  },
+  "overrides": {
+    "fast-xml-parser": ">=5.3.6"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

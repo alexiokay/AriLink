@@ -137,6 +137,48 @@
       </div>
     </section>
 
+    <!-- Integrations -->
+    <section class="space-y-4">
+      <div class="flex items-center gap-2 px-2 pb-2 border-b border-(--ui-border)">
+        <UIcon name="i-lucide-puzzle" class="size-4 text-primary" />
+        <h2 class="text-sm font-bold uppercase tracking-wider text-muted-foreground">Integrations</h2>
+      </div>
+
+      <UCard class="shadow-sm">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <div class="p-2 rounded-lg bg-primary/10">
+              <UIcon name="i-lucide-cable" class="size-5 text-primary" />
+            </div>
+            <div>
+              <p class="font-bold text-sm text-(--ui-text-highlighted)">MCP Server</p>
+              <p class="text-xs text-(--ui-text-dimmed)">
+                Model Context Protocol — lets AI agents (Claude, VS Code, Cline, etc.) control AriLink
+              </p>
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <UBadge
+              :label="mcpStatus"
+              :color="mcpOn ? 'success' : 'neutral'"
+              variant="subtle"
+              size="xs"
+            />
+            <USwitch v-model="mcpOn" size="sm" @update:model-value="toggleMcp" />
+          </div>
+        </div>
+        <div v-if="mcpOn" class="mt-3 pt-3 border-t border-(--ui-border) space-y-1">
+          <p class="text-xs text-(--ui-text-dimmed)">
+            <span class="font-medium text-(--ui-text-muted)">Endpoint:</span>
+            <code class="ml-1 px-1.5 py-0.5 rounded bg-(--ui-bg-elevated) font-mono text-primary">{{ mcpEndpoint }}</code>
+          </p>
+          <p class="text-xs text-(--ui-text-dimmed)">
+            See <NuxtLink to="/docs" class="text-primary underline underline-offset-2">docs</NuxtLink> for client configuration (Claude Code, VS Code, Cline, etc.)
+          </p>
+        </div>
+      </UCard>
+    </section>
+
     <!-- Call Routing (incoming calls only — campaigns bypass this) -->
     <section class="space-y-4">
       <div class="flex items-center justify-between px-2 pb-2 border-b border-(--ui-border)">
@@ -465,6 +507,32 @@
 <script setup lang="ts">
 const { serverConfig, emit } = useSocket();
 
+// --- MCP Server ---
+const mcpOn = ref(true);
+const mcpStatus = computed(() => mcpOn.value ? "Active" : "Disabled");
+const mcpEndpoint = computed(() => {
+  const host = window.location.hostname || "localhost";
+  const port = window.location.port || "3011";
+  return `http://${host}:${port}/mcp`;
+});
+
+async function fetchMcpStatus() {
+  try {
+    const data = await $fetch<{ mcpEnabled: boolean }>("/api/mcp-status");
+    mcpOn.value = data.mcpEnabled;
+  } catch {
+    // MCP status endpoint not available
+  }
+}
+
+async function toggleMcp(enabled: boolean) {
+  try {
+    await $fetch("/api/mcp-toggle", { method: "POST", body: { enabled } });
+  } catch {
+    mcpOn.value = !enabled; // revert on error
+  }
+}
+
 // --- Assistant Mode ---
 const assistant = ref("ivr-transfer");
 const assistantOptions = ref<{ label: string; value: string }[]>([]);
@@ -756,6 +824,7 @@ async function applyImport() {
 }
 
 onMounted(() => {
+  fetchMcpStatus();
   fetchAssistants();
   fetchRouting();
   fetchEnv();
