@@ -641,6 +641,47 @@ class AriControllerServer extends EventEmitter {
       this.sessionMessageHandlers.delete(sessionId);
       this.deleteRustSession(sessionId);
     });
+
+    // ── OpenClaw-specific events ──
+
+    // Forward transcriptions to connected OpenClaw plugin instances
+    assistant.on("openclawTranscription", (data: { callId: string; text: string; isFinal: boolean; callerNumber?: string }) => {
+      if (this.dashboard?.hasOpenClawClients()) {
+        this.dashboard.emitOpenClawTranscription(data);
+      }
+    });
+
+    // Notify OpenClaw that a call started
+    assistant.on("openclawCallStarted", (data: { sessionId: string; callerId: string; extension: string }) => {
+      if (this.dashboard?.hasOpenClawClients()) {
+        this.dashboard.emitOpenClawCallStarted({
+          callId: data.sessionId,
+          number: data.callerId,
+          direction: "inbound",
+        });
+      }
+    });
+
+    // Notify OpenClaw that a call ended
+    assistant.on("openclawCallEnded", (data: { callId: string; reason?: string }) => {
+      if (this.dashboard?.hasOpenClawClients()) {
+        this.dashboard.emitOpenClawCallEnded(data);
+      }
+    });
+
+    // OpenClaw wants to speak to the caller via TTS
+    assistant.on("openclawSpeak", (data: { sessionId: string; text: string }) => {
+      // TODO: Integrate a TTS engine (Festival, Piper, ElevenLabs, etc.)
+      // For now, log and acknowledge — the text-to-speech pipeline needs
+      // an actual TTS synthesizer to convert text → audio → Asterisk playback
+      console.log(`[Session ${sessionId}] OpenClaw TTS requested: "${data.text.substring(0, 80)}..."`);
+
+      // Notify assistant that speaking is done (so it returns to LISTENING)
+      // In a real TTS integration, this would fire after audio playback completes
+      if (assistant.onSpeakingDone) {
+        assistant.onSpeakingDone();
+      }
+    });
   }
 
   /**
@@ -1036,6 +1077,19 @@ class AriControllerServer extends EventEmitter {
         this.sessionMessageHandlers.delete(session.id);
         this.deleteRustSession(session.id);
       }
+    } else if (action === "openclawSpeak") {
+      // OpenClaw plugin sent a "speak" command — find the session's assistant
+      const session = this.sessionManager.getSession(data.callId);
+      if (session) {
+        const assistant = this.sessionManager.getAssistant(session.id);
+        if (assistant && typeof assistant.onOpenClawSpeak === "function") {
+          assistant.onOpenClawSpeak(data.text);
+        }
+      }
+    } else if (action === "openclawDial") {
+      // OpenClaw wants to initiate an outbound call
+      console.log(`[Controller] OpenClaw dial request to: ${data.to}`);
+      // TODO: Implement outbound dialing for OpenClaw (originate call + assign OpenClaw assistant)
     } else if (action === "reconnectAri") {
       console.log("[Dashboard] Manual ARI reconnect requested");
       if (this.dashboard) this.dashboard.updateServiceStatus("asterisk", "connecting", "Reconnecting...");

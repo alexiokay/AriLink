@@ -1,0 +1,17 @@
+{
+  "name": "OpenClawAssistant",
+  "description": "Routes incoming calls to an OpenClaw AI agent. Transcriptions are forwarded to OpenClaw, and the agent's text responses are spoken back to the caller via TTS.",
+  "mode": "incoming",
+  "language": "en-US",
+  "prompts": {
+    "welcome": "custom/openclaw_welcome",
+    "goodbye": "custom/goodbye",
+    "error": "custom/error",
+    "timeout": "custom/timeout"
+  },
+  "behavior": {
+    "maxRetries": 3,
+    "timeoutSeconds": 60,
+    "silenceThresholdSeconds": 10
+  }
+}

@@ -12,6 +12,9 @@ class DashboardServer {
   private logCollector: any | null = null;
   private callHistory: any | null = null;
 
+  // OpenClaw integration — track connected OpenClaw plugin instances
+  private openclawSockets: Set<string> = new Set();
+
   // Live service state — updated by AriControllerServer
   private serviceState: Record<string, any> = {
     asterisk: { label: "Asterisk", status: "connecting", detail: "" },
@@ -355,8 +358,88 @@ class DashboardServer {
         }
       });
 
+      // ── OpenClaw Integration ──
+
+      socket.on("openclaw:register", (data: any) => {
+        this.openclawSockets.add(socket.id);
+        socket.join("openclaw"); // Join room for targeted broadcasts
+        console.log(`[OpenClaw] Plugin registered: ${socket.id}`, data);
+
+        // Send current active calls to the newly connected OpenClaw instance
+        const calls = this.getActiveCalls().filter(
+          (c: any) => c.assistant === "openclaw" || c.assistant === "OpenClawAssistant"
+        );
+        if (calls.length > 0) {
+          socket.emit("openclaw:status", {
+            connected: true,
+            activeCalls: calls.length,
+          });
+        }
+      });
+
+      socket.on("openclaw:speak", (data: { callId: string; text: string }, ack?: (res: any) => void) => {
+        if (!data?.callId || !data?.text) {
+          ack?.({ ok: false, error: "Missing callId or text" });
+          return;
+        }
+        console.log(`[OpenClaw] Speak request for ${data.callId}: "${data.text.substring(0, 60)}..."`);
+        if (this.actionHandler) {
+          this.actionHandler("openclawSpeak", data);
+        }
+        ack?.({ ok: true });
+      });
+
+      socket.on("openclaw:initiate_call", (data: { to: string; message?: string }, ack?: (res: any) => void) => {
+        if (!data?.to) {
+          ack?.({ ok: false, error: "Missing 'to' number" });
+          return;
+        }
+        console.log(`[OpenClaw] Initiate call to ${data.to}`);
+        if (this.actionHandler) {
+          this.actionHandler("openclawDial", data);
+        }
+        ack?.({ ok: true });
+      });
+
+      socket.on("openclaw:hangup", (data: { callId: string }, ack?: (res: any) => void) => {
+        if (!data?.callId) {
+          ack?.({ ok: false, error: "Missing callId" });
+          return;
+        }
+        console.log(`[OpenClaw] Hangup request for ${data.callId}`);
+        if (this.actionHandler) {
+          this.actionHandler("hangup", { sessionId: data.callId });
+        }
+        ack?.({ ok: true });
+      });
+
+      socket.on("openclaw:transfer", (data: { callId: string; to: string }, ack?: (res: any) => void) => {
+        if (!data?.callId || !data?.to) {
+          ack?.({ ok: false, error: "Missing callId or to" });
+          return;
+        }
+        console.log(`[OpenClaw] Transfer ${data.callId} → ${data.to}`);
+        if (this.actionHandler) {
+          this.actionHandler("transfer", { sessionId: data.callId, endpoint: data.to });
+        }
+        ack?.({ ok: true });
+      });
+
+      socket.on("openclaw:status", (data: { callId?: string }, ack?: (res: any) => void) => {
+        const calls = this.getActiveCalls();
+        if (data?.callId) {
+          const call = calls.find((c: any) => c.id === data.callId);
+          ack?.({ ok: true, call: call || null });
+        } else {
+          ack?.({ ok: true, activeCalls: calls.length, calls });
+        }
+      });
+
+      // ── Disconnect ──
+
       socket.on("disconnect", () => {
         console.log(`[Dashboard] Client disconnected: ${socket.id}`);
+        this.openclawSockets.delete(socket.id);
         for (const [key, session] of Object.entries(terminalSessions)) {
           try { (session as any).dispose(); } catch {}
           delete terminalSessions[key];
@@ -431,6 +514,28 @@ class DashboardServer {
     if (this.callHistory && data.is_final && data.text) {
       this.callHistory.saveEvent({ callId: data.sessionId, type: "transcription", text: data.text, timestamp: new Date(ts).toISOString() });
     }
+  }
+
+  // --- OpenClaw event emitters (called by AriControllerServer) ---
+
+  /** Forward transcription to connected OpenClaw plugins */
+  emitOpenClawTranscription(data: { callId: string; text: string; isFinal: boolean; callerNumber?: string }) {
+    this.io.to("openclaw").emit("openclaw:transcription", data);
+  }
+
+  /** Notify OpenClaw that a new call has started */
+  emitOpenClawCallStarted(data: { callId: string; number: string; direction: string }) {
+    this.io.to("openclaw").emit("openclaw:call-started", data);
+  }
+
+  /** Notify OpenClaw that a call has ended */
+  emitOpenClawCallEnded(data: { callId: string; reason?: string }) {
+    this.io.to("openclaw").emit("openclaw:call-ended", data);
+  }
+
+  /** Check if any OpenClaw plugins are connected */
+  hasOpenClawClients(): boolean {
+    return this.openclawSockets.size > 0;
   }
 
   getIO() {
