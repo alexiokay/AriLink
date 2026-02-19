@@ -1,0 +1,45 @@
+{
+  "id": "arilink",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "arilinkUrl": {
+        "type": "string",
+        "description": "URL of the AriLink server (e.g., http://localhost:3011)",
+        "default": "http://localhost:3011"
+      },
+      "autoAnswer": {
+        "type": "boolean",
+        "description": "Automatically answer incoming calls and route to AI",
+        "default": true
+      },
+      "greeting": {
+        "type": "string",
+        "description": "Text spoken to caller when call is answered (TTS)",
+        "default": "Hello, how can I help you today?"
+      },
+      "ttsProvider": {
+        "type": "string",
+        "enum": ["asterisk", "elevenlabs", "openai"],
+        "description": "Text-to-speech provider for agent responses",
+        "default": "asterisk"
+      },
+      "ttsVoice": {
+        "type": "string",
+        "description": "Voice ID for TTS (provider-specific)",
+        "default": ""
+      },
+      "silenceTimeoutMs": {
+        "type": "number",
+        "description": "Hang up after this many ms of silence (0 = never)",
+        "default": 30000
+      },
+      "maxCallDurationMs": {
+        "type": "number",
+        "description": "Maximum call duration in ms (0 = unlimited)",
+        "default": 600000
+      }
+    },
+    "additionalProperties": false
+  }
+}

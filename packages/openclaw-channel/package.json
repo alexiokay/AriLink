@@ -1,0 +1,52 @@
+{
+  "name": "@arilink/openclaw-channel",
+  "version": "1.0.0",
+  "description": "AriLink channel plugin for OpenClaw — make and receive phone calls via Asterisk PBX with local AI transcription",
+  "type": "module",
+  "main": "index.ts",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "asterisk",
+    "ari",
+    "pbx",
+    "telephony",
+    "sip",
+    "voip",
+    "transcription",
+    "arilink"
+  ],
+  "author": "Alexi Pawelec",
+  "license": "ACL-1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AriLink/arilink.git",
+    "directory": "packages/openclaw-channel"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.2.13"
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.0"
+  },
+  "openclaw": {
+    "extensions": ["./index.ts"],
+    "channels": ["arilink"],
+    "installDependencies": true,
+    "channel": {
+      "id": "arilink",
+      "label": "AriLink (Asterisk PBX)",
+      "selectionLabel": "AriLink — Phone calls via Asterisk",
+      "docsPath": "/channels/arilink",
+      "docsLabel": "arilink",
+      "blurb": "Make and receive real phone calls via your own Asterisk PBX with local AI transcription. No Twilio needed.",
+      "order": 65,
+      "aliases": ["asterisk", "pbx", "sip"]
+    },
+    "install": {
+      "npmSpec": "@arilink/openclaw-channel",
+      "localPath": ".",
+      "defaultChoice": "npm"
+    }
+  }
+}
