@@ -11,7 +11,7 @@
     </div>
 
     <!-- Service Status Cards -->
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
       <UCard v-for="(svc, key) in services" :key="key">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-3">
@@ -91,6 +91,7 @@ function serviceIcon(key: string): string {
     asterisk: "i-lucide-server",
     rustRtp: "i-lucide-radio",
     transcription: "i-lucide-mic",
+    tts: "i-lucide-volume-2",
   };
   return icons[key] || "i-lucide-circle";
 }

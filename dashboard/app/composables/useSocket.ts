@@ -15,6 +15,7 @@ export function useSocket() {
     asterisk: { status: "unknown", label: "Asterisk" },
     rustRtp: { status: "unknown", label: "Rust RTP" },
     transcription: { status: "unknown", label: "Transcription" },
+    tts: { status: "unknown", label: "TTS (Kokoro)" },
   }));
   const transcriptions = useState<any[]>("transcriptions", () => []);
   const serverConfig = useState<Record<string, any>>("server-config", () => ({}));
@@ -76,6 +77,7 @@ export function useSocket() {
         asterisk: { status: "disconnected", label: "Asterisk", detail: "Server offline" },
         rustRtp: { status: "disconnected", label: "Rust RTP", detail: "Server offline" },
         transcription: { status: "disconnected", label: "Transcription", detail: "Server offline" },
+        tts: { status: "disconnected", label: "TTS (Kokoro)", detail: "Server offline" },
       };
       activeCalls.value = [];
       campaignStatus.value = { status: "idle", progress: 0, total: 0, activeCalls: 0, results: [] };
