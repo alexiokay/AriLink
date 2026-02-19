@@ -1,0 +1,34 @@
+{
+  "name": "arilink",
+  "version": "1.0.0",
+  "description": "AriLink — AI-powered telephony platform. Self-hosted, open-source alternative to Bland.ai and Vapi.",
+  "bin": {
+    "arilink": "./src/cli.mjs"
+  },
+  "type": "module",
+  "keywords": [
+    "asterisk",
+    "ari",
+    "telephony",
+    "voip",
+    "sip",
+    "ai",
+    "transcription",
+    "ivr",
+    "pbx",
+    "call-center"
+  ],
+  "author": "Alexi Pawelec",
+  "license": "SEE LICENSE IN ../../LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AriLink/arilink"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "src/",
+    "templates/"
+  ]
+}

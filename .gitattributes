@@ -1,0 +1,20 @@
+# Auto-detect text files and ensure LF line endings on checkout
+* text=auto eol=lf
+
+# Explicitly mark shell scripts as LF (critical for Docker containers)
+*.sh text eol=lf
+
+# Keep Windows batch files as CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files — don't touch
+*.png binary
+*.jpg binary
+*.ico binary
+*.wav binary
+*.mp3 binary
+*.sln16 binary
+*.ulaw binary
+*.alaw binary
+*.g722 binary

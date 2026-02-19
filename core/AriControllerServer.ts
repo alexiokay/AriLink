@@ -729,9 +729,10 @@ class AriControllerServer extends EventEmitter {
   ) {
     const fromNumber = process.env.FROM_NUMBER || "unknown";
     const appName = process.env.STASIS_APP_NAME || "stasis-app";
+    const trunkContext = process.env.TRANSFER_TRUNK || "from-internal";
 
     const outgoingChannelParams = {
-      endpoint: `Local/${recipient}@from-internal`,
+      endpoint: `Local/${recipient}@${trunkContext}`,
       app: appName,
       callerId: fromNumber,
       appArgs: "dialed",

@@ -1,0 +1,35 @@
+# Parakeet TDT 0.6B-v3 — GPU variant (NVIDIA CUDA)
+#
+# Used via: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+
+FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
+
+WORKDIR /app
+
+# Install Python 3.10 and system deps
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      python3.10 python3.10-venv python3-pip \
+      libsndfile1 ffmpeg build-essential && \
+    ln -sf /usr/bin/python3.10 /usr/bin/python && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+
+# Install PyTorch with CUDA 12.4 support, then the rest
+RUN pip install --no-cache-dir \
+      torch torchaudio --index-url https://download.pytorch.org/whl/cu124 && \
+    pip install --no-cache-dir -r requirements.txt
+
+COPY server.py .
+COPY main.py .
+
+ENV TRANSCRIPTION_DEVICE=cuda
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 5000
+
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=120s \
+  CMD python -c "import socket; s=socket.socket(); s.settimeout(5); s.connect(('127.0.0.1',5000)); s.close()" || exit 1
+
+CMD python server.py --host 0.0.0.0 --port 5000 --device cuda

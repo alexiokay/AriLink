@@ -1,0 +1,15 @@
+# Development override — mount local source for live editing
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# Edit files locally, then restart to apply:
+#   docker compose restart arilink
+
+services:
+  arilink:
+    volumes:
+      - ./core:/app/core                  # Call logic, engine, controllers
+      - ./assistants:/app/assistants      # Assistant plugins
+      - ./data:/app/data
+      - ./logs:/app/logs

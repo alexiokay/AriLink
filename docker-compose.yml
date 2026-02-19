@@ -1,0 +1,113 @@
+# AriLink — Docker Compose
+#
+# Quick start:
+#   docker compose up
+#
+# With GPU transcription:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+#
+# With Rust RTP server:
+#   docker compose --profile rust-rtp up
+#
+# Dashboard:  http://localhost:3011
+# SIP phone:  localhost:5060  (extension 1001, password demo1001)
+
+services:
+
+  # ─── Asterisk PBX ───
+  asterisk:
+    build: ./docker/asterisk
+    container_name: arilink-asterisk
+    environment:
+      - ASTERISK_LOGIN=${ASTERISK_LOGIN:-arilink}
+      - ASTERISK_PASSWORD=${ASTERISK_PASSWORD:-arilink123}
+      - STASIS_APP_NAME=${STASIS_APP_NAME:-stasis-app}
+    ports:
+      - "5060:5060/udp"       # SIP signaling
+      - "8088:8088"           # ARI HTTP API
+      - "10000-10100:10000-10100/udp"  # RTP media (reduced range for demo)
+    networks:
+      - arilink
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'ari show status' | grep -q 'Enabled'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ─── Parakeet Transcription Service (CPU) ───
+  parakeet:
+    build: ./transcription-services/parakeet-service
+    container_name: arilink-parakeet
+    environment:
+      - TRANSCRIPTION_DEVICE=cpu
+    ports:
+      - "5000:5000"
+    volumes:
+      - parakeet-cache:/root/.cache    # Model downloads persist across restarts
+    networks:
+      - arilink
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(5); s.connect(('127.0.0.1',5000)); s.close()\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 180s   # Model loading can take a few minutes on first run
+
+  # ─── AriLink Dashboard + Engine ───
+  arilink:
+    build: .
+    container_name: arilink-app
+    environment:
+      - PBX_IP=asterisk
+      - ASTERISK_LOGIN=${ASTERISK_LOGIN:-arilink}
+      - ASTERISK_PASSWORD=${ASTERISK_PASSWORD:-arilink123}
+      - STASIS_APP_NAME=${STASIS_APP_NAME:-stasis-app}
+      - TRANSCRIPTION_SERVICES=ws://parakeet:5000
+      - LISTENER_SERVER=0.0.0.0:8000
+      - EXTERNAL_HOST=arilink
+      - AUTO_START_TRANSCRIPTION=false
+      - SPEECH_LANG=${SPEECH_LANG:-en-US}
+      - DEFAULT_ASSISTANT=${DEFAULT_ASSISTANT:-ivr-transfer}
+      - USE_RUST_RTP=false
+      - RUST_SERVER_URL=http://rust-rtp:9900
+      - WSS_PORT=${WSS_PORT:-3044}
+      - PORT=3011
+      - NITRO_PORT=3011
+    ports:
+      - "3011:3011"           # Dashboard UI + API
+      - "8000:8000/udp"       # RTP listener (receives audio from Asterisk)
+    volumes:
+      - ./data:/app/data      # SQLite call history database
+      - ./logs:/app/logs      # Log files
+    depends_on:
+      asterisk:
+        condition: service_healthy
+      parakeet:
+        condition: service_started    # Don't wait for healthy — model takes time to load
+    networks:
+      - arilink
+    restart: unless-stopped
+
+  # ─── Rust RTP Server (optional) ───
+  rust-rtp:
+    build: ./rust-rtp-server
+    container_name: arilink-rust-rtp
+    environment:
+      - RUST_LOG=info
+    ports:
+      - "9900:9900"
+    networks:
+      - arilink
+    restart: unless-stopped
+    profiles:
+      - rust-rtp
+
+networks:
+  arilink:
+    driver: bridge
+
+volumes:
+  parakeet-cache:

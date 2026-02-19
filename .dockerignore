@@ -1,0 +1,44 @@
+# Dependencies (rebuilt inside container)
+node_modules/
+dashboard/node_modules/
+
+# Python virtual environments
+transcription-services/*/\.venv/
+transcription-services/*/venv/
+__pycache__/
+*.pyc
+
+# Build outputs
+dashboard/.output/
+dashboard/.nuxt/
+dashboard/.data/
+rust-rtp-server/target/
+
+# Runtime data (mounted as volumes)
+data/
+logs/
+recordings/
+
+# Git and IDE
+.git/
+.gitignore
+.codegraph/
+.claude/
+.vscode/
+
+# Environment (injected via compose)
+.env
+.env.*
+!.env.example
+
+# Documentation (not needed in image)
+docs/
+*.md
+LICENSE
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Docker files (prevent recursive context)
+docker-compose*.yml

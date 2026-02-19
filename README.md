@@ -162,7 +162,33 @@ Automated outbound dialing:
 
 ## Getting Started
 
-### Prerequisites
+### Docker (Recommended)
+
+The fastest way to try AriLink — no Node.js, Python, or Asterisk installation needed:
+
+```bash
+docker compose up -d
+```
+
+This starts Asterisk + AI transcription + Dashboard. Open [localhost:3011](http://localhost:3011).
+
+**Test with a SIP phone** (Zoiper, Linphone): server `localhost:5060`, extension `1001`, password `demo1001`.
+
+```bash
+# With GPU transcription (NVIDIA)
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+
+# With live code editing (mount local source)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
+
+See [docs/docker.md](docs/docker.md) for full Docker guide, configuration, and troubleshooting.
+
+### Manual Setup
+
+For development or connecting to an existing FreePBX server:
+
+#### Prerequisites
 
 1. **Set up FreePBX server**:
    - New installation? [FreePBX Installation Guide](docs/freepbx-setup.md)
@@ -174,7 +200,7 @@ Automated outbound dialing:
    irm https://astral.sh/uv/install.ps1 | iex
    ```
 
-### Installation
+#### Installation
 
 1. **Clone and install dependencies** (one command installs everything):
    ```bash
@@ -195,7 +221,7 @@ Automated outbound dialing:
    # Edit .env with your FreePBX IP, ARI credentials, etc.
    ```
 
-### Running
+#### Running
 
 ```bash
 # Development (hot reload, auto-starts Parakeet if configured)
@@ -248,7 +274,8 @@ See [`.env.example`](.env.example) for all options with documentation.
 - ~~Additional speech recognition providers~~ **Done**
 - Additional providers: Scribe (ElevenLabs), Azure Speech, Deepgram
 - Call analytics and reporting
-- One-click deployment (Docker, Railway)
+- ~~One-click deployment (Docker)~~ **Done**
+- Railway / cloud deployment
 - Transcription management GUI (model downloads, provider config)
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the full roadmap.

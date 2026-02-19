@@ -1,0 +1,24 @@
+# GPU override for Parakeet transcription service
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+#
+# Requires:
+#   - NVIDIA GPU
+#   - NVIDIA Container Toolkit (nvidia-docker2)
+#   - CUDA 12.x drivers installed on host
+
+services:
+  parakeet:
+    build:
+      context: ./transcription-services/parakeet-service
+      dockerfile: Dockerfile.gpu
+    environment:
+      - TRANSCRIPTION_DEVICE=cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
