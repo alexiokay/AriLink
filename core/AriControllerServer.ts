@@ -765,6 +765,11 @@ class AriControllerServer extends EventEmitter {
     assistant.on("openclawSpeak", (data: { sessionId: string; text: string }) => {
       this.speakOnChannel(sessionId, channel, data.text, assistant);
     });
+
+    // BrainHarness speak request — any brain can request TTS
+    assistant.on("speakRequest", (data: { sessionId: string; text: string }) => {
+      this.speakOnChannel(sessionId, channel, data.text, assistant);
+    });
   }
 
   /**

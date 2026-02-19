@@ -9,6 +9,7 @@ export enum AssistantState {
 export interface AssistantConfig {
   name: string;
   mode?: "incoming" | "outbound";
+  brain?: string;  // Pluggable brain mode (e.g., "ivr-transfer", "openclaw", "direct-dial")
   language: string;
   prompts: {
     welcome: string;

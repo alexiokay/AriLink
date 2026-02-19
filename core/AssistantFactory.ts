@@ -1,7 +1,7 @@
 const path = require("path");
 const fs = require("fs");
 
-import type { IAssistant } from "../assistants/base/AssistantTypes";
+import type { IAssistant, AssistantConfig } from "../assistants/base/AssistantTypes";
 
 // Routing config: maps extensions/callerIDs to assistant types
 interface RoutingRule {
@@ -59,10 +59,12 @@ function matchRoute(value: string, rules: RoutingRule[]): string | null {
  * - YourAssistant.ts (exporting a class named YourAssistant)
  */
 
-// Registry: slug -> { modulePath, exportName }
+// Registry: slug -> { modulePath, exportName } (for classic assistants)
 let registry: Record<string, { modulePath: string; exportName: string }> | null = null;
-// Cache of loaded constructors
+// Cache of loaded constructors (both assistant classes and brain classes)
 const assistantCache: Record<string, any> = {};
+// Brain registry: brainName -> { modulePath, exportName }
+const brainRegistry: Record<string, { modulePath: string; exportName: string }> = {};
 
 function buildRegistry(): Record<string, { modulePath: string; exportName: string }> {
   const assistantsDir = path.resolve(__dirname, "../assistants");
@@ -86,6 +88,31 @@ function buildRegistry(): Record<string, { modulePath: string; exportName: strin
     const modulePath = path.join(dirPath, assistantFile);
 
     reg[entry] = { modulePath, exportName };
+  }
+
+  // Also discover brains from assistants/brains/
+  const brainsDir = path.join(assistantsDir, "brains");
+  if (fs.existsSync(brainsDir) && fs.statSync(brainsDir).isDirectory()) {
+    const brainFiles = fs.readdirSync(brainsDir);
+    for (const f of brainFiles) {
+      if (!f.endsWith("Brain.ts") && !f.endsWith("Brain.js")) continue;
+      if (f.endsWith(".d.ts")) continue;
+
+      const exportName = f.replace(/\.(ts|js)$/, "");
+      // Derive brain slug: "IvrTransferBrain" -> "ivr-transfer"
+      const slug = exportName
+        .replace(/Brain$/, "")
+        .replace(/([a-z])([A-Z])/g, "$1-$2")
+        .toLowerCase();
+
+      brainRegistry[slug] = {
+        modulePath: path.join(brainsDir, f),
+        exportName,
+      };
+    }
+    if (Object.keys(brainRegistry).length > 0) {
+      console.log(`[AssistantFactory] Discovered ${Object.keys(brainRegistry).length} brains: ${Object.keys(brainRegistry).join(", ")}`);
+    }
   }
 
   console.log(`[AssistantFactory] Discovered ${Object.keys(reg).length} assistants: ${Object.keys(reg).join(", ")}`);
@@ -119,7 +146,11 @@ function getAssistantClass(type: string): any {
 
 class AssistantFactory {
   /**
-   * Create assistant by explicit type name (slug matches folder name)
+   * Create assistant by explicit type name (slug matches folder name).
+   *
+   * If the assistant's config.json has a "brain" field, creates a BrainHarness
+   * with the specified brain instead of a custom assistant class.
+   * This allows config-driven brain selection without custom assistant code.
    */
   static createByType(
     type: string,
@@ -127,8 +158,66 @@ class AssistantFactory {
     sessionId: string,
     contacts?: any
   ): IAssistant {
-    const AssistantClass = getAssistantClass(type.toLowerCase());
+    const slug = type.toLowerCase();
+
+    // Check if this assistant type has a config.json with a "brain" field
+    const assistantsDir = path.resolve(__dirname, "../assistants");
+    const configPath = path.join(assistantsDir, slug, "config.json");
+
+    if (fs.existsSync(configPath)) {
+      try {
+        const config: AssistantConfig & { brain?: string } = JSON.parse(
+          fs.readFileSync(configPath, "utf-8")
+        );
+
+        if (config.brain && brainRegistry[config.brain]) {
+          return AssistantFactory.createWithBrain(config, config.brain, client, sessionId, contacts);
+        }
+      } catch {
+        // Fall through to classic assistant creation
+      }
+    }
+
+    // Classic: load the *Assistant.ts class directly
+    const AssistantClass = getAssistantClass(slug);
     return new AssistantClass(client, sessionId, contacts);
+  }
+
+  /**
+   * Create an assistant using the BrainHarness + a named brain.
+   * This is the pluggable brain architecture.
+   */
+  static createWithBrain(
+    config: AssistantConfig,
+    brainName: string,
+    client: any,
+    sessionId: string,
+    contacts?: any
+  ): IAssistant {
+    const brainEntry = brainRegistry[brainName];
+    if (!brainEntry) {
+      const available = Object.keys(brainRegistry).join(", ");
+      throw new Error(`[AssistantFactory] Unknown brain: "${brainName}". Available: ${available}`);
+    }
+
+    // Load brain class
+    const brainCacheKey = `brain:${brainName}`;
+    if (!assistantCache[brainCacheKey]) {
+      const mod = require(brainEntry.modulePath);
+      assistantCache[brainCacheKey] = mod[brainEntry.exportName];
+    }
+    const BrainClass = assistantCache[brainCacheKey];
+
+    // Load BrainHarness
+    if (!assistantCache["__BrainHarness"]) {
+      const { BrainHarness } = require("../assistants/base/BrainHarness");
+      assistantCache["__BrainHarness"] = BrainHarness;
+    }
+    const BrainHarness = assistantCache["__BrainHarness"];
+
+    const brain = new BrainClass();
+    console.log(`[AssistantFactory] Creating BrainHarness with brain: ${brainName}`);
+    return new BrainHarness(config, client, sessionId, contacts, brain);
   }
 
   /**
