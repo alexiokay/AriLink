@@ -12,6 +12,7 @@ const {
   sessionManager,
 } = require("./CallSession");
 const { AssistantFactory } = require("./AssistantFactory");
+const { TtsClient } = require("./TtsClient");
 
 // Type definition for CallSessionData (inline since we can't import types with require)
 interface CallSessionData {
@@ -37,6 +38,7 @@ class AriControllerServer extends EventEmitter {
   private rustServerUrl: string | undefined;
   private dashboard: any;
   private callHistory: any;
+  private ttsClient: any;
 
   // Map to store per-session WebSocket message handlers
   private sessionMessageHandlers: Map<string, (message: any) => void> =
@@ -57,6 +59,7 @@ class AriControllerServer extends EventEmitter {
     // Injected dependencies (from Nitro bootstrap plugin)
     this.dashboard = deps?.dashboard || null;
     this.callHistory = deps?.callHistory || null;
+    this.ttsClient = null;
 
     // Use the session manager for multi-call support
     this.sessionManager = sessionManager;
@@ -65,6 +68,10 @@ class AriControllerServer extends EventEmitter {
   async start(contacts: any[]) {
     // Connect to transcription/RTP WebSocket
     this.connectTranscriptionWS();
+
+    // Connect to TTS service (Kokoro)
+    this.connectTTS();
+
     this.contacts = contacts;
 
     if (this.contacts) {
@@ -274,6 +281,91 @@ class AriControllerServer extends EventEmitter {
       // Auto-reconnect after 5 seconds
       this.scheduleTranscriptionReconnect();
     });
+  }
+
+  /**
+   * Connect to the TTS service (Kokoro) for text-to-speech synthesis.
+   */
+  connectTTS() {
+    const ttsUrl = process.env.TTS_SERVICE;
+    if (!ttsUrl) {
+      console.log("[Controller] TTS_SERVICE not configured — text-to-speech disabled");
+      if (this.dashboard) {
+        this.dashboard.updateServiceStatus("tts", "disabled", "TTS_SERVICE not set");
+      }
+      return;
+    }
+
+    console.log(`[Controller] Connecting TTS: ${ttsUrl}`);
+    this.ttsClient = new TtsClient(ttsUrl, {
+      voice: process.env.TTS_VOICE,
+      speed: parseFloat(process.env.TTS_SPEED || "1.0"),
+    });
+
+    this.ttsClient.on("connected", () => {
+      console.log("[Controller] TTS service connected");
+      if (this.dashboard) {
+        this.dashboard.updateServiceStatus("tts", "connected", ttsUrl);
+      }
+    });
+
+    this.ttsClient.on("disconnected", () => {
+      console.log("[Controller] TTS service disconnected");
+      if (this.dashboard) {
+        this.dashboard.updateServiceStatus("tts", "disconnected");
+      }
+    });
+
+    this.ttsClient.on("error", (err: any) => {
+      console.error(`[Controller] TTS error: ${err.message || err}`);
+      if (this.dashboard) {
+        this.dashboard.updateServiceStatus("tts", "error", err.message || "Connection failed");
+      }
+    });
+
+    this.ttsClient.connect();
+  }
+
+  /**
+   * Synthesize text and play it on a channel via Asterisk.
+   * Returns a promise that resolves when playback finishes.
+   */
+  async speakOnChannel(
+    sessionId: string,
+    channel: any,
+    text: string,
+    assistant?: any
+  ): Promise<void> {
+    if (!this.ttsClient?.isConnected()) {
+      console.error(`[Session ${sessionId}] TTS not connected — cannot speak`);
+      if (assistant?.onSpeakingDone) assistant.onSpeakingDone();
+      return;
+    }
+
+    try {
+      // Synthesize text → temp slin16 file
+      const filePath = await this.ttsClient.synthesize(sessionId, text);
+
+      // Play via Asterisk (strip .sln16 extension — Asterisk auto-detects format)
+      const soundPath = filePath.replace(/\.sln16$/, "");
+      channel.play({ media: `sound:${soundPath}` }, (err: any, playback: any) => {
+        if (err) {
+          console.error(`[Session ${sessionId}] TTS playback error:`, err);
+          TtsClient.cleanupFile(filePath);
+          if (assistant?.onSpeakingDone) assistant.onSpeakingDone();
+          return;
+        }
+
+        playback.once("PlaybackFinished", () => {
+          console.log(`[Session ${sessionId}] TTS playback finished`);
+          TtsClient.cleanupFile(filePath);
+          if (assistant?.onSpeakingDone) assistant.onSpeakingDone();
+        });
+      });
+    } catch (err: any) {
+      console.error(`[Session ${sessionId}] TTS synthesis failed: ${err.message}`);
+      if (assistant?.onSpeakingDone) assistant.onSpeakingDone();
+    }
   }
 
   private transcriptionReconnectTimer: any = null;
@@ -671,16 +763,7 @@ class AriControllerServer extends EventEmitter {
 
     // OpenClaw wants to speak to the caller via TTS
     assistant.on("openclawSpeak", (data: { sessionId: string; text: string }) => {
-      // TODO: Integrate a TTS engine (Festival, Piper, ElevenLabs, etc.)
-      // For now, log and acknowledge — the text-to-speech pipeline needs
-      // an actual TTS synthesizer to convert text → audio → Asterisk playback
-      console.log(`[Session ${sessionId}] OpenClaw TTS requested: "${data.text.substring(0, 80)}..."`);
-
-      // Notify assistant that speaking is done (so it returns to LISTENING)
-      // In a real TTS integration, this would fire after audio playback completes
-      if (assistant.onSpeakingDone) {
-        assistant.onSpeakingDone();
-      }
+      this.speakOnChannel(sessionId, channel, data.text, assistant);
     });
   }
 
@@ -1146,6 +1229,12 @@ class AriControllerServer extends EventEmitter {
     if (this.ws) {
       try { this.ws.close(); } catch {}
       this.ws = null;
+    }
+
+    // Close TTS client
+    if (this.ttsClient) {
+      this.ttsClient.close();
+      this.ttsClient = null;
     }
 
     this.emit("close");

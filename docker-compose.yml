@@ -3,7 +3,7 @@
 # Quick start:
 #   docker compose up
 #
-# With GPU transcription:
+# With GPU (Parakeet STT + Kokoro TTS):
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
 #
 # With Rust RTP server:
@@ -56,6 +56,28 @@ services:
       retries: 3
       start_period: 180s   # Model loading can take a few minutes on first run
 
+  # ─── Kokoro TTS Service (CPU) ───
+  kokoro:
+    build: ./tts-services/kokoro-service
+    container_name: arilink-kokoro
+    environment:
+      - TTS_VOICE=${TTS_VOICE:-af_heart}
+      - TTS_SPEED=${TTS_SPEED:-1.0}
+      - TTS_LANG=${TTS_LANG:-a}
+    ports:
+      - "5001:5001"
+    volumes:
+      - kokoro-cache:/root/.cache     # Model downloads persist across restarts
+    networks:
+      - arilink
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import socket; s=socket.socket(); s.settimeout(5); s.connect(('127.0.0.1',5001)); s.close()\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s   # Model loading can take a few minutes on first run
+
   # ─── AriLink Dashboard + Engine ───
   arilink:
     build: .
@@ -66,6 +88,7 @@ services:
       - ASTERISK_PASSWORD=${ASTERISK_PASSWORD:-arilink123}
       - STASIS_APP_NAME=${STASIS_APP_NAME:-stasis-app}
       - TRANSCRIPTION_SERVICES=ws://parakeet:5000
+      - TTS_SERVICE=ws://kokoro:5001
       - LISTENER_SERVER=0.0.0.0:8000
       - EXTERNAL_HOST=arilink
       - AUTO_START_TRANSCRIPTION=false
@@ -111,3 +134,4 @@ networks:
 
 volumes:
   parakeet-cache:
+  kokoro-cache:

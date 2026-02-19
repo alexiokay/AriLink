@@ -63,6 +63,7 @@ class DashboardServer {
 
   private initServiceState() {
     const useRust = process.env.USE_RUST_RTP === "true";
+    const ttsUrl = process.env.TTS_SERVICE;
     this.serviceState = {
       asterisk: {
         label: "Asterisk",
@@ -78,6 +79,11 @@ class DashboardServer {
         label: "Transcription",
         status: "connecting",
         detail: process.env.TRANSCRIPTION_SERVICES || "not configured",
+      },
+      tts: {
+        label: "TTS (Kokoro)",
+        status: ttsUrl ? "connecting" : "disabled",
+        detail: ttsUrl || "TTS_SERVICE not set",
       },
     };
   }

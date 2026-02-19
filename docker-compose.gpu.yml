@@ -1,4 +1,4 @@
-# GPU override for Parakeet transcription service
+# GPU override for Parakeet (STT) and Kokoro (TTS) services
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
@@ -15,6 +15,20 @@ services:
       dockerfile: Dockerfile.gpu
     environment:
       - TRANSCRIPTION_DEVICE=cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  kokoro:
+    build:
+      context: ./tts-services/kokoro-service
+      dockerfile: Dockerfile
+    environment:
+      - TTS_DEVICE=cuda
     deploy:
       resources:
         reservations:
