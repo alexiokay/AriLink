@@ -16,13 +16,14 @@ docker compose up -d
 open http://localhost:3011
 ```
 
-That's it. Three services start automatically:
+That's it. Four services start automatically:
 
 | Service | Port | Description |
 |---------|------|-------------|
 | **Dashboard** | [localhost:3011](http://localhost:3011) | Web UI + API + Socket.IO |
 | **Asterisk** | localhost:5060 (SIP), localhost:8088 (ARI) | PBX with ARI enabled |
-| **Parakeet** | localhost:5000 | AI transcription (CPU) |
+| **Parakeet** | localhost:5000 | AI speech-to-text (STT) |
+| **Kokoro** | localhost:5001 | AI text-to-speech (TTS) |
 
 ### Test with a SIP Phone
 
@@ -69,7 +70,7 @@ For much faster transcription with an NVIDIA GPU:
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 ```
 
-This swaps the Parakeet service to a CUDA-enabled image. Transcription goes from ~2x real-time (CPU) to ~2000x real-time (GPU).
+This swaps Parakeet and Kokoro to CUDA-enabled images. STT goes from ~2x real-time (CPU) to ~2000x real-time (GPU). TTS also benefits significantly from GPU acceleration.
 
 ### Prerequisites
 
@@ -78,13 +79,13 @@ This swaps the Parakeet service to a CUDA-enabled image. Transcription goes from
 
 ## Rust RTP Server (Optional)
 
-For higher performance audio handling:
+For echo cancellation (AEC3), Silero VAD barge-in detection, and high-performance audio handling:
 
 ```bash
 docker compose --profile rust-rtp up -d
 ```
 
-This starts an additional Rust-based RTP server. Set `USE_RUST_RTP=true` in `.env` to route audio through it.
+This starts an additional Rust-based RTP server with WebRTC-grade echo cancellation and neural speech detection. Add `USE_RUST_RTP=true` to `.env` to route audio through it (required when using `--profile rust-rtp`).
 
 ## Customizing Code (Live Editing)
 
@@ -123,11 +124,11 @@ npm run dev
 You can still run Asterisk and Parakeet in Docker while developing locally:
 
 ```bash
-# Start only Asterisk + Parakeet
-docker compose up -d asterisk parakeet
+# Start only Asterisk + Parakeet + Kokoro
+docker compose up -d asterisk parakeet kokoro
 
 # Run the app locally with hot reload
-PBX_IP=localhost TRANSCRIPTION_SERVICES=ws://localhost:5000 npm run dev
+PBX_IP=localhost TRANSCRIPTION_SERVICES=ws://localhost:5000 TTS_SERVICE=ws://localhost:5001 npm run dev
 ```
 
 This is the recommended workflow for active development.
@@ -163,9 +164,14 @@ arilink open        # Open dashboard in browser
 │                                                 │
 │  ┌───────────┐  ┌───────────┐  ┌────────────┐  │
 │  │ Asterisk  │  │ Parakeet  │  │  AriLink   │  │
-│  │ :5060 SIP │  │ :5000 WS  │  │ :3011 HTTP │  │
+│  │ :5060 SIP │  │ :5000 STT │  │ :3011 HTTP │  │
 │  │ :8088 ARI │  │           │  │ :8000 RTP  │  │
 │  └───────────┘  └───────────┘  └────────────┘  │
+│       │              │              │           │
+│  ┌───────────┐       │              │           │
+│  │  Kokoro   │       │              │           │
+│  │ :5001 TTS │       │              │           │
+│  └───────────┘       │              │           │
 │       │              │              │           │
 │       └──── ARI ─────┘── WS ───────┘           │
 │                                                 │
@@ -178,7 +184,8 @@ arilink open        # Open dashboard in browser
 
 - **Asterisk** receives SIP calls and sends RTP audio to AriLink
 - **AriLink** connects to Asterisk via ARI, forwards audio to Parakeet for transcription
-- **Parakeet** runs the AI model and streams transcription results back
+- **Parakeet** runs the STT model and streams transcription results back
+- **Kokoro** runs the TTS model and synthesizes speech from text (used by OpenClaw and any brain that calls `speak()`)
 
 ## Volumes
 
@@ -186,7 +193,8 @@ arilink open        # Open dashboard in browser
 |-------|---------|
 | `./data:/app/data` | SQLite call history database |
 | `./logs:/app/logs` | Application log files |
-| `parakeet-cache` | AI model downloads (persists across rebuilds) |
+| `parakeet-cache` | STT model downloads (persists across rebuilds) |
+| `kokoro-cache` | TTS model downloads (persists across rebuilds) |
 
 ## Build Times
 
@@ -195,9 +203,55 @@ arilink open        # Open dashboard in browser
 | Asterisk | ~30s | Instant (cached) |
 | AriLink | ~2 min | Instant (cached) |
 | Parakeet | ~5-9 min | Instant (cached) |
-| **Total** | **~8-12 min** | **~5s** |
+| Kokoro | ~3-5 min | Instant (cached) |
+| **Total** | **~11-17 min** | **~5s** |
 
 First build downloads base images and installs all dependencies. Docker caches every layer, so subsequent builds only rebuild what changed.
+
+## Container Management from Dashboard
+
+When running in Docker, the dashboard can restart individual containers without SSH access. This is enabled automatically when the Docker socket is mounted.
+
+### How It Works
+
+The `arilink` container communicates with the Docker daemon via the mounted socket (`/var/run/docker.sock`). A hardcoded allowlist ensures only known sibling containers can be managed:
+
+| Dashboard Service | Docker Container | Restart Delay |
+|-------------------|-----------------|---------------|
+| Transcription (Parakeet) | `arilink-parakeet` | 3s reconnect |
+| TTS (Kokoro) | `arilink-kokoro` | 3s reconnect |
+| Asterisk | `arilink-asterisk` | 5s reconnect |
+| Rust RTP | `arilink-rust-rtp` | — |
+
+### Dashboard UI
+
+- **Home page**: Each service card shows a restart button (when Docker is available) alongside the existing reconnect button. Container state, health, and uptime are displayed below each card.
+- **Config page**: The Transcription Engine card has a dedicated "Restart Container" button.
+
+### REST API
+
+Container management is also available via REST (useful for CLI tools or MCP):
+
+```bash
+# Get all container statuses
+curl http://localhost:3011/api/docker/status
+
+# Restart a specific container
+curl -X POST http://localhost:3011/api/docker/restart \
+  -H "Content-Type: application/json" \
+  -d '{"service": "kokoro"}'
+```
+
+### Disabling
+
+Set `DOCKER_MANAGEMENT=false` in your `.env` to disable container management even when the socket is mounted. When Docker is not available (local development), all container-related UI is hidden automatically.
+
+### Security
+
+- The socket is mounted **read-only** (`ro`) — only inspect and restart commands work
+- Container names come from a hardcoded allowlist (never from user input)
+- Commands use `execFile` (not `exec`) to prevent shell injection
+- Only the Docker CLI binary is installed (~30MB), not the daemon
 
 ## Troubleshooting
 
@@ -227,6 +281,20 @@ Parakeet downloads the AI model on first run (~2GB). Check if it's still loading
 docker compose logs -f parakeet
 ```
 
+### Kokoro TTS not starting
+
+First start downloads the model (~500MB). Check logs:
+```bash
+docker compose logs -f kokoro
+```
+The healthcheck has a 180-second start period to allow for model download.
+
 ### Port conflicts
 
-If ports 5060, 3011, or 8088 are already in use, stop the conflicting service or change the port mapping in `docker-compose.yml`.
+If ports 5060, 3011, 5001, or 8088 are already in use, stop the conflicting service or change the port mapping in `docker-compose.yml`.
+
+## Related
+
+- [OpenClaw Integration](OPENCLAW-INTEGRATION.md) — Connect AriLink to OpenClaw AI agents
+- [Assistant Architecture](ASSISTANT-ARCHITECTURE.md) — How assistants and brains work
+- [Transcription Services](TRANSCRIPTION-SERVICES.md) — STT configuration

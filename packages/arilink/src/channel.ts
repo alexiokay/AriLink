@@ -101,6 +101,9 @@ export const arilinkChannel: ChannelPlugin<ResolvedAriLinkAccount> = {
           : "Not connected",
       };
     },
+
+    resolveAccountState: ({ configured }: any) =>
+      configured ? "linked" : "not linked",
   },
 
   // ─── Security ───
@@ -159,6 +162,17 @@ export const arilinkChannel: ChannelPlugin<ResolvedAriLinkAccount> = {
       );
 
       const socket = connect(config);
+
+      // Wait for actual connection before returning to OpenClaw
+      await new Promise<void>((resolve, reject) => {
+        if (socket.connected) return resolve();
+        const timeout = setTimeout(() => reject(new Error("Connection timeout")), 15000);
+        socket.once("connect", () => { clearTimeout(timeout); resolve(); });
+        socket.once("connect_error", (err) => { clearTimeout(timeout); reject(err); });
+      });
+
+      // Tell OpenClaw we're running
+      ctx.setStatus?.({ accountId: ctx.accountId, status: "connected" });
 
       // ── Incoming call: transcription arrives ──
       socket.on(
@@ -253,16 +267,28 @@ export const arilinkChannel: ChannelPlugin<ResolvedAriLinkAccount> = {
         }
       );
 
-      // Handle abort signal for graceful shutdown
-      if (ctx.abortSignal) {
-        ctx.abortSignal.addEventListener("abort", () => {
+      // Block until OpenClaw signals shutdown or socket dies
+      await new Promise<void>((resolve) => {
+        const onAbort = () => {
           console.log("[AriLink] Shutting down channel");
           disconnect();
           activeCalls.clear();
-        });
-      }
+          resolve();
+        };
 
-      return { socket };
+        const onDisconnect = (reason: string) => {
+          console.log(`[AriLink] Socket lost: ${reason}`);
+          ctx.setStatus?.({ accountId: ctx.accountId, status: "disconnected" });
+          activeCalls.clear();
+          resolve();
+        };
+
+        socket.on("disconnect", onDisconnect);
+
+        if (ctx.abortSignal) {
+          ctx.abortSignal.addEventListener("abort", onAbort);
+        }
+      });
     },
 
     stopAccount: async () => {

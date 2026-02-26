@@ -24,7 +24,7 @@
 │                           │  Real-Time AI Logic          │
 ├─────────────────────────────────────────────────────────┤
 │  Speech Processing        │  STT: Parakeet / Riva        │
-│                           │  TTS: Piper / ElevenLabs     │
+│                           │  TTS: Kokoro / ElevenLabs    │
 ├─────────────────────────────────────────────────────────┤
 │  Telephony Layer          │  Asterisk / FreePBX (ARI)    │
 │                           │  → later: Twilio, WebRTC     │
@@ -166,18 +166,22 @@ Full transcript
 
 ---
 
-## What Already Exists (v1)
+## What Already Exists
 
 - Asterisk ARI integration with session management
-- Rust RTP server for low-latency audio capture
-- Parakeet STT (25 languages, auto-detection, auto-spawn from Engine)
-- Pluggable assistant architecture (state machine based)
-- Campaign engine (auto-dialer with concurrent calls)
-- Nuxt 4 dashboard with real-time Socket.IO
-- AI-powered assistant code editor (Mistral)
+- Rust RTP server with **AEC3 echo cancellation** + **Silero VAD** + speech detection
+- **Parakeet STT** (25 languages, auto-detection, auto-spawn from Engine)
+- **Kokoro TTS** (82M params, local, 16kHz slin16 output)
+- **Pluggable brain architecture** (BrainHarness + IBrain interface)
+- **LlmChatBrain** — streaming LLM + sentence-by-sentence TTS + barge-in
+- **Shared voice intelligence** — filler filtering, turn debouncing, barge-in handling (benefits all brains)
+- IvrTransferBrain, DirectDialBrain, OpenClawBrain
+- Campaign engine (AutoDialer with concurrent call pacing)
+- Nuxt 4 dashboard with real-time Socket.IO (live calls, campaigns, call history, config, logs)
 - Call history with SQLite storage
-- Contact matching
-- Routing rules engine
+- Contact matching + extension/callerID routing rules
+- **OpenClaw integration** (channel plugin + brain)
+- **Docker Compose** + `arilink` CLI tool
 
 ---
 
@@ -299,25 +303,27 @@ SMS is sent self-hosted — no Twilio dependency:
 
 ---
 
-## Phase 3: LLM Conversational Voice Agent
+## Phase 3: LLM Conversational Voice Agent (DONE)
 
-> Full AI voice agent — thinks and speaks naturally.
+> Full AI voice agent — thinks and speaks naturally. **Implemented as LlmChatBrain.**
 
 ### Architecture
 
 ```
-Caller → Asterisk → Rust RTP → Parakeet STT
-                                    ↓
-                              Conversation Engine
-                              (context + history + business data)
-                                    ↓
-                              LLM (Mistral / GPT / Claude)
-                              → text response
-                              → tool calls (MCP)
-                                    ↓
-                              Piper TTS → audio
-                                    ↓
-                              Asterisk → Caller
+Caller → Asterisk → Rust RTP (AEC3 + Silero VAD) → Parakeet STT
+                                                        ↓
+                                                  BrainHarness
+                                                  (filler filter + turn debounce)
+                                                        ↓
+                                                  LlmChatBrain
+                                                  (context + history + streaming)
+                                                        ↓
+                                                  LLM (Mistral / GPT / Claude)
+                                                  → streamed text response
+                                                        ↓
+                                                  Kokoro TTS → slin16 audio
+                                                        ↓
+                                                  Asterisk → Caller
 ```
 
 ### Key Components
@@ -329,24 +335,24 @@ Caller → Asterisk → Rust RTP → Parakeet STT
 - Sends to LLM, receives structured response
 - LLM outputs decisions as JSON, not free text
 
-**TTS Service** (same auto-spawn pattern as Parakeet):
+**TTS Service** (already implemented):
 
 | Engine | Type | Languages | Latency | Quality | Cost |
 |--------|------|-----------|---------|---------|------|
-| **Piper TTS** | Local | 20+ | ~100ms | Good | Free (MIT) |
-| **Coqui TTS** | Local | 15+ | ~200ms | Great | Free (MPL) |
+| **Kokoro 82M** | Local | 9 | ~100ms | Good | Free (Apache 2.0) |
 | **ElevenLabs** | Cloud | 30+ | ~300ms | Excellent | $5-99/mo |
 | **OpenAI TTS** | Cloud | 50+ | ~400ms | Excellent | Per char |
 
-Recommended: **Piper TTS** for local/free. Auto-spawned by Engine like Parakeet.
+Current: **Kokoro 82M** — local, zero cost, 16kHz slin16 output, WebSocket protocol.
 
-### New Assistant Type: `ConversationalAssistant`
+### Implemented: `LlmChatBrain`
 
-Extends BaseAssistant:
+Uses BrainHarness (pluggable brain architecture):
 - System prompt defines personality, knowledge, rules
-- Streaming: start TTS on first LLM sentence (low latency)
-- Barge-in: detect caller speaking → stop TTS → listen
-- Tool use: LLM calls MCP tools mid-conversation
+- **Streaming**: start TTS on first LLM sentence (sentence-by-sentence)
+- **Barge-in**: AEC3 + Silero VAD detect speech → cancel TTS → BargeInError unblocks brain
+- **Shared voice intelligence**: filler filtering + turn debouncing in BrainHarness
+- Tool use: LLM calls MCP tools mid-conversation *(planned — Phase 2)*
 - Multi-language: detect language from STT, respond in same language
 
 ### Environment Variables
@@ -354,10 +360,11 @@ Extends BaseAssistant:
 | Variable | Description |
 |----------|-------------|
 | `TTS_SERVICE` | TTS URL (`ws://localhost:5001`) |
-| `AUTO_START_TTS` | Auto-start TTS on Engine boot |
-| `CONVERSATION_LLM` | Provider (`mistral`/`openai`/`anthropic`) |
-| `CONVERSATION_MODEL` | Model name |
-| `CONVERSATION_API_KEY` | API key |
+| `TTS_VOICE` / `TTS_SPEED` / `TTS_LANG` | Voice, speed, language |
+| `LLM_PROVIDER` | Provider preset (`ollama`/`gemini`/`openai`/`openrouter`/`custom`) |
+| `LLM_MODEL` | Model name |
+| `LLM_API_KEY` | API key (not needed for local Ollama) |
+| `LLM_ENDPOINT` | Custom endpoint URL (override preset) |
 
 ### Business Data Injection
 
@@ -378,6 +385,23 @@ System:
 **"Multi-Language Voice Agent"** — Switch English → Polish → German mid-call, AI follows
 
 **"Voice-Controlled PBX"** — "Disable extension 200" → AI confirms → executes ARI command
+
+---
+
+## Production Hardening (Optional — when needed)
+
+> Not blocking for v1. The app is production-ready for self-hosted/LAN deployments. These items become relevant when exposing to the internet or serving multiple users.
+
+| Priority | Item | Notes |
+|----------|------|-------|
+| Nice to have | **Dashboard authentication** | Simple `DASHBOARD_PASSWORD` env var → login prompt. Prevents accidental exposure. Not needed on isolated LANs. |
+| Nice to have | **Health endpoint** | `GET /api/health` returning service status. Useful for load balancers and monitoring. 5 min to implement. |
+| Document only | **HTTPS** | Not built-in — document "use nginx/Caddy reverse proxy for public access". Standard for self-hosted apps. |
+| Not needed | **Rate limiting** | Internal tool, not a public API. Only consumers are dashboard UI and Asterisk. |
+| Not needed | **Input validation on API routes** | Dashboard is the only consumer. Low risk for internal tool. |
+| Roadmap | **Unit/integration tests** | Worth it long-term for stable contracts (BrainHarness, TtsClient, transcription failover). Not blocking — architecture still evolving. |
+| Already done | **Session cleanup** | `StasisEnd` properly cleans up all session state (maps, Rust session, dashboard notification, call history). Asterisk guarantees this event even on abnormal disconnects. |
+| Non-issue | **Verbose console.logs** | `LogCollector` intercepts all output with level filtering. Dashboard shows logs with search. Not a problem. |
 
 ---
 
@@ -579,12 +603,13 @@ The app has 3 tiers of compute needs:
 
 ### Deliverables
 
-- [ ] Multi-stage `Dockerfile` (Rust build + Node.js + dashboard)
-- [ ] `docker-compose.yml` with all services
+- [x] Multi-stage `Dockerfile` (Rust build + Node.js + dashboard)
+- [x] `docker-compose.yml` with all services (Asterisk, Parakeet, Kokoro, AriLink, Rust RTP)
+- [x] `.env.example` with all options documented
+- [x] `arilink` CLI tool (`arilink init/start/stop/status/logs/update/open`)
 - [ ] `railway.json` / `render.yaml` for one-click deploy buttons
 - [ ] Deploy button in README ("Deploy to Railway", "Deploy to Render")
 - [ ] RunPod serverless template for Parakeet transcription endpoint
-- [ ] `.env.example` with all options documented
 
 ### Transcription Management GUI
 

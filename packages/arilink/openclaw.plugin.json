@@ -1,5 +1,6 @@
 {
   "id": "arilink",
+  "channels": ["arilink"],
   "configSchema": {
     "type": "object",
     "properties": {

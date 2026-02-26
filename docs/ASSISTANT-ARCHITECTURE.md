@@ -42,54 +42,71 @@ graph TB
     subgraph "AriLink"
         subgraph "Core Infrastructure"
             Controller[AriControllerServer]
-            Manager[SessionManager]
+            TTS[TtsClient → Kokoro]
             RustRTP[Rust RTP Server]
         end
 
         subgraph "Assistant System"
             Factory[AssistantFactory]
             Base[BaseAssistant]
+            Harness[BrainHarness]
 
-            subgraph "Assistant Implementations"
-                Default[DefaultAssistant]
-                CS[CustomerServiceAssistant]
-                Sales[SalesAssistant]
-                Custom[CustomAssistant]
+            subgraph "Classic Assistants"
+                IVR[IvrTransferAssistant]
+                DD[DirectDialAssistant]
+                OC[OpenClawAssistant]
+                AD[AutoDialerCallAssistant]
+            end
+
+            subgraph "Pluggable Brains"
+                LLMBrain[LlmChatBrain]
+                IVRBrain[IvrTransferBrain]
+                DDBrain[DirectDialBrain]
+                OCBrain[OpenClawBrain]
             end
         end
 
         subgraph "Transcription Services"
             Parakeet[Parakeet TDT 0.6B-v3]
-            Whisper[Whisper Service]
         end
     end
 
     PBX --> ARI
     ARI <--> Controller
     Controller --> Factory
-    Factory --> Default
-    Factory --> CS
-    Factory --> Sales
-    Factory --> Custom
+    Factory --> IVR
+    Factory --> DD
+    Factory --> OC
+    Factory --> AD
+    Factory --> Harness
 
-    Default -.inherits.-> Base
-    CS -.inherits.-> Base
-    Sales -.inherits.-> Base
-    Custom -.inherits.-> Base
+    IVR -.inherits.-> Base
+    DD -.inherits.-> Base
+    OC -.inherits.-> Base
+    AD -.inherits.-> Base
+    Harness -.inherits.-> Base
 
-    Controller <--> Manager
-    RustRTP --> RTP
-    RustRTP <--> Parakeet
-    RustRTP <--> Whisper
+    Harness --> LLMBrain
+    Harness --> IVRBrain
+    Harness --> DDBrain
+    Harness --> OCBrain
 
+    Controller <--> TTS
     Controller <--> RustRTP
+    RustRTP <--> Parakeet
 
     style Controller fill:#e1f5ff
     style Factory fill:#fff4e1
     style Base fill:#f0f0f0
-    style Default fill:#d4edda
-    style CS fill:#d4edda
-    style Sales fill:#d4edda
+    style Harness fill:#fff0f5
+    style IVR fill:#d4edda
+    style DD fill:#d4edda
+    style OC fill:#d4edda
+    style AD fill:#d4edda
+    style LLMBrain fill:#e7d4ed
+    style IVRBrain fill:#e7d4ed
+    style DDBrain fill:#e7d4ed
+    style OCBrain fill:#e7d4ed
 ```
 
 ### 2. Assistant Class Hierarchy
@@ -119,101 +136,105 @@ classDiagram
         +transferCall(extension)
         +getState()
         +setState(state)
-        #abstract onCallStart()
-        #abstract onTranscription()
-        #abstract onDTMFInput()
-        #abstract onCallEnd()
     }
 
-    class DefaultAssistant {
-        -menuState: MenuState
-        -retryCount: number
+    class BrainHarness {
+        -brain: IBrain
         +onCallStart()
         +onTranscription()
         +onDTMFInput()
         +onCallEnd()
-        -handleMenuNavigation()
-        -handleHelp()
     }
 
-    class CustomerServiceAssistant {
-        -ticketSystem: TicketAPI
-        -conversationHistory: Array
+    class IBrain {
+        <<interface>>
+        +init(harness)
+        +onCallStart(callerId, extension)
+        +onTranscription(text, isFinal)
+        +onDTMFInput(digit)
+        +onCallEnd()
+        +destroy()
+    }
+
+    class IvrTransferAssistant {
+        -contactMatcher: ContactMatcher
+        -retryManager: RetryManager
         +onCallStart()
         +onTranscription()
         +onDTMFInput()
         +onCallEnd()
-        -createTicket()
-        -escalateToHuman()
     }
 
-    class SalesAssistant {
-        -crmSystem: CRMAPI
-        -leadScore: number
+    class DirectDialAssistant {
+        -contactMatcher: ContactMatcher
+        -retryManager: RetryManager
+        +onCallStart()
+        +onTranscription()
+        +onCallEnd()
+    }
+
+    class OpenClawAssistant {
+        -callerId: string
         +onCallStart()
         +onTranscription()
         +onDTMFInput()
         +onCallEnd()
-        -checkInventory()
-        -scheduleMeeting()
+        +onOpenClawSpeak()
     }
 
     IAssistant <|.. BaseAssistant
-    BaseAssistant <|-- DefaultAssistant
-    BaseAssistant <|-- CustomerServiceAssistant
-    BaseAssistant <|-- SalesAssistant
+    BaseAssistant <|-- IvrTransferAssistant
+    BaseAssistant <|-- DirectDialAssistant
+    BaseAssistant <|-- OpenClawAssistant
+    BaseAssistant <|-- BrainHarness
+    BrainHarness o-- IBrain : delegates to
+    IBrain <|.. LlmChatBrain
+    IBrain <|.. IvrTransferBrain
+    IBrain <|.. DirectDialBrain
+    IBrain <|.. OpenClawBrain
 ```
 
-### 3. Call Flow Sequence Diagram
+### 3. Call Flow Sequence Diagram (IVR Transfer)
 
 ```mermaid
 sequenceDiagram
     participant Caller
-    participant FreePBX
+    participant Asterisk
     participant Controller as AriControllerServer
     participant Factory as AssistantFactory
-    participant Assistant as CustomerServiceAssistant
-    participant RustRTP as Rust RTP Server
+    participant Assistant as IvrTransferAssistant
     participant Parakeet as Parakeet Service
 
-    Caller->>FreePBX: Dials extension 101
-    FreePBX->>Controller: StasisStart event
+    Caller->>Asterisk: Dials extension 200
+    Asterisk->>Controller: StasisStart event
 
-    Controller->>Factory: createFromExtension(101, channel)
-    Factory->>Assistant: new CustomerServiceAssistant(channel)
-    Assistant-->>Factory: instance
+    Controller->>Factory: createFromExtension("200", client, sessionId)
+    Factory->>Assistant: new IvrTransferAssistant(client, sessionId)
     Factory-->>Controller: assistant
 
-    Controller->>Assistant: onCallStart(channel, callerId, "101")
-    Assistant->>Controller: playAudio("custom/cs_welcome")
-    Controller->>FreePBX: Play audio
-    FreePBX->>Caller: "Welcome to customer service..."
+    Controller->>Assistant: onCallStart(channel, callerId, "200")
+    Assistant->>Asterisk: playAudio("custom/welcome_2")
+    Asterisk->>Caller: "Welcome, press 1 to speak..."
 
-    Assistant->>Assistant: setState(LISTENING)
-
-    Caller->>FreePBX: Speaks "I need help"
-    FreePBX->>RustRTP: Audio stream (RTP)
-    RustRTP->>Parakeet: Audio data
-    Parakeet-->>RustRTP: Transcription
-    RustRTP->>Controller: Transcription event
-
-    Controller->>Assistant: onTranscription("I need help", true)
-    Assistant->>Assistant: Analyze intent
-    Assistant->>Controller: playAudio("custom/cs_help_menu")
-    Controller->>FreePBX: Play menu
-
-    Caller->>FreePBX: Presses DTMF "1"
-    FreePBX->>Controller: DTMF event
+    Caller->>Asterisk: Presses DTMF "1"
+    Asterisk->>Controller: DTMF event
     Controller->>Assistant: onDTMFInput("1")
-    Assistant->>Assistant: Navigate to option 1
-    Assistant->>Controller: transferCall("200")
-    Controller->>FreePBX: Transfer to ext 200
+    Assistant->>Assistant: setState(PROCESSING)
+    Assistant->>Asterisk: playAudio("beep")
 
-    Caller->>FreePBX: Hangs up
-    FreePBX->>Controller: StasisEnd event
+    Caller->>Asterisk: Speaks "John Smith"
+    Asterisk->>Controller: RTP audio
+    Controller->>Parakeet: Audio stream
+    Parakeet-->>Controller: Transcription
+
+    Controller->>Assistant: onTranscription("John Smith", true)
+    Assistant->>Assistant: contactMatcher.findNumberByWords()
+    Assistant->>Controller: emit("contactMatched", { number: "100" })
+    Controller->>Asterisk: Transfer to ext 100
+
+    Caller->>Asterisk: Hangs up
+    Asterisk->>Controller: StasisEnd event
     Controller->>Assistant: onCallEnd(channel)
-    Assistant->>Assistant: setState(IDLE)
-    Assistant->>Assistant: Cleanup & log
 ```
 
 ### 4. Extension-to-Assistant Routing
@@ -221,21 +242,21 @@ sequenceDiagram
 ```mermaid
 graph LR
     subgraph "Incoming Calls"
-        C1[Ext 100-199<br/>Customer Service]
-        C2[Ext 200-299<br/>Sales]
-        C3[Ext 300-399<br/>Technical Support]
+        C1[Ext 10x<br/>Direct Dial]
+        C2[Ext 20x<br/>IVR Transfer]
+        C3[Ext 30x<br/>OpenClaw AI]
         C4[Others<br/>Default]
     end
 
     subgraph "AssistantFactory"
-        Router[Route by Extension]
+        Router[Route by Extension<br/>config/routing.json]
     end
 
     subgraph "Assistants"
-        A1[CustomerServiceAssistant]
-        A2[SalesAssistant]
-        A3[TechSupportAssistant]
-        A4[DefaultAssistant]
+        A1[DirectDialAssistant]
+        A2[IvrTransferAssistant]
+        A3[OpenClawAssistant]
+        A4[Default from env]
     end
 
     C1 --> Router
@@ -243,9 +264,9 @@ graph LR
     C3 --> Router
     C4 --> Router
 
-    Router -->|100-199| A1
-    Router -->|200-299| A2
-    Router -->|300-399| A3
+    Router -->|"10[0-9]"| A1
+    Router -->|"20[0-9]"| A2
+    Router -->|"30[0-9]"| A3
     Router -->|Other| A4
 
     style Router fill:#fff4e1
@@ -299,500 +320,333 @@ stateDiagram-v2
 
 ## Components
 
-### 📁 Directory Structure
+### Directory Structure
 
 ```
 arilink/
 ├── assistants/
 │   ├── base/
-│   │   ├── AssistantInterface.ts      # Interface definition
-│   │   ├── BaseAssistant.ts           # Abstract base class
-│   │   └── AssistantTypes.ts          # Common types & enums
+│   │   ├── AssistantTypes.ts          # IAssistant, AssistantConfig, AssistantState
+│   │   ├── BaseAssistant.ts           # Abstract base class (playAudio, setState, etc.)
+│   │   ├── BrainTypes.ts              # IBrain, IBrainHarness interfaces
+│   │   └── BrainHarness.ts            # Universal assistant that delegates to a brain
 │   │
-│   ├── default/
-│   │   ├── DefaultAssistant.ts        # Default assistant
-│   │   └── config.json                # Configuration
+│   ├── brains/                        # Pluggable brain implementations
+│   │   ├── LlmChatBrain.ts           # Streaming LLM + TTS conversational agent
+│   │   ├── IvrTransferBrain.ts        # DTMF → voice → contact match → transfer
+│   │   ├── DirectDialBrain.ts         # Voice → contact match → transfer
+│   │   └── OpenClawBrain.ts           # Forward transcriptions to OpenClaw AI
 │   │
-│   ├── customer-service/
-│   │   ├── CustomerServiceAssistant.ts
+│   ├── llm-chat/
 │   │   └── config.json
 │   │
-│   ├── sales/
-│   │   ├── SalesAssistant.ts
+│   ├── ivr-transfer/
+│   │   ├── IvrTransferAssistant.ts    # Classic assistant (standalone)
 │   │   └── config.json
 │   │
-│   └── README.md
+│   ├── direct-dial/
+│   │   ├── DirectDialAssistant.ts     # Classic assistant (standalone)
+│   │   └── config.json
+│   │
+│   ├── openclaw/
+│   │   ├── OpenClawAssistant.ts       # Classic assistant (standalone)
+│   │   └── config.json
+│   │
+│   └── auto-dialer-call/
+│       ├── AutoDialerCallAssistant.ts
+│       └── config.json
 │
 ├── core/
-│   ├── AriControllerServer.ts         # Uses AssistantFactory
-│   ├── AssistantFactory.ts            # Creates assistants
+│   ├── AriControllerServer.ts         # Main controller, uses AssistantFactory
+│   ├── AssistantFactory.ts            # Creates assistants (classic or brain-based)
+│   ├── TtsClient.ts                   # WebSocket client for Kokoro TTS
+│   ├── DashboardServer.ts             # Socket.IO hub for dashboard + OpenClaw
 │   └── ...
 │
-└── docs/
-    └── ASSISTANT-ARCHITECTURE.md      # This file
+├── config/
+│   └── routing.json                   # Extension/CallerID → assistant routing rules
+│
+└── tts-services/
+    └── kokoro-service/                # Text-to-Speech microservice
+        ├── server.py
+        ├── requirements.txt
+        └── Dockerfile
 ```
 
 ---
 
-## Implementation Guide
+## Two Creation Modes
 
-### Step 1: Create Base Interface
+AriLink supports two ways to create assistants. Both are backwards compatible.
 
-**File:** `assistants/base/AssistantInterface.ts`
+### Mode 1: Classic Assistant (standalone class)
+
+Each assistant is a class that extends `BaseAssistant` and embeds all its logic directly. This is the original approach.
+
+```
+AssistantFactory.createByType("ivr-transfer", client, sessionId)
+  → loads assistants/ivr-transfer/IvrTransferAssistant.ts
+  → new IvrTransferAssistant(client, sessionId)
+```
+
+### Mode 2: Brain + BrainHarness (pluggable)
+
+The brain architecture separates **telephony plumbing** (BrainHarness) from **decision logic** (IBrain). A brain is a lightweight class that only handles call flow decisions.
+
+```
+config.json: { "brain": "openclaw" }
+
+AssistantFactory.createByType("openclaw", client, sessionId)
+  → reads config.json, sees "brain": "openclaw"
+  → loads assistants/brains/OpenClawBrain.ts
+  → new BrainHarness(config, client, sessionId, contacts, new OpenClawBrain())
+```
+
+### When to use which
+
+| Use Case | Approach |
+|----------|----------|
+| Simple, self-contained logic | Classic assistant |
+| Swappable behavior via config | Brain + BrainHarness |
+| OpenClaw / AI integration | Brain (OpenClawBrain) |
+| Same assistant folder, different brains | Brain (change `"brain"` in config.json) |
+
+---
+
+## Brain Architecture
+
+### IBrain Interface
 
 ```typescript
-export interface IAssistant {
-  // Lifecycle hooks
-  onCallStart(channel: any, callerId: string, extension: string): Promise<void>;
-  onCallEnd(channel: any): Promise<void>;
-
-  // Input handlers
+// assistants/base/BrainTypes.ts
+export interface IBrain {
+  init(harness: IBrainHarness): void;
+  onCallStart(callerId: string, extension: string): Promise<void>;
   onTranscription(text: string, isFinal: boolean): Promise<void>;
   onDTMFInput(digit: string): Promise<void>;
-
-  // Actions
-  playAudio(audioFile: string): Promise<void>;
-  speak(text: string): Promise<void>;
-  transferCall(extension: string): Promise<void>;
-  hangup(): Promise<void>;
-
-  // State management
-  getState(): AssistantState;
-  setState(state: AssistantState): void;
-}
-
-export enum AssistantState {
-  IDLE = "idle",
-  LISTENING = "listening",
-  PROCESSING = "processing",
-  SPEAKING = "speaking",
-  TRANSFERRING = "transferring"
-}
-
-export interface AssistantConfig {
-  name: string;
-  language: string;
-  prompts: {
-    welcome: string;
-    goodbye: string;
-    error: string;
-    timeout: string;
-  };
-  behavior: {
-    maxRetries: number;
-    timeoutSeconds: number;
-    silenceThresholdSeconds: number;
-  };
+  onCallEnd(): Promise<void>;
+  onSpeakingDone?(): void;   // Optional: called when TTS finishes
+  destroy(): void;
 }
 ```
 
-### Step 2: Create Base Class
+### IBrainHarness API
 
-**File:** `assistants/base/BaseAssistant.ts`
+Methods available to brains via `this.harness`:
 
-```typescript
-import { IAssistant, AssistantConfig, AssistantState } from './AssistantInterface';
+| Method | Description |
+|--------|-------------|
+| `playAudio(file)` | Play pre-recorded audio (blocks until done) |
+| `playAudioNoWait(file)` | Play audio without blocking |
+| `playAudioWithFallback(file, fallback)` | Play audio, use fallback if missing |
+| `speak(text)` | Synthesize text via TTS and play to caller |
+| `transferCall(endpoint)` | Transfer the call |
+| `hangup()` | Hang up the call |
+| `setState(state)` | Set assistant state |
+| `isState(state)` | Check current state |
+| `emitEvent(event, data)` | Emit custom event (picked up by controller) |
+| `cancelSpeaking()` | Cancel current speech (rejects pending speak() with BargeInError) |
+| `sessionId` | Current session ID |
+| `config` | Assistant configuration |
+| `getContacts()` | Access the contacts database |
 
-export abstract class BaseAssistant implements IAssistant {
-  protected config: AssistantConfig;
-  protected state: AssistantState = AssistantState.IDLE;
-  protected channel: any;
-  protected ari: any; // ARI client reference
+### Available Brains
 
-  constructor(config: AssistantConfig, ari: any) {
-    this.config = config;
-    this.ari = ari;
-  }
+| Brain | Slug | Flow |
+|-------|------|------|
+| LLM Chat | `llm-chat` | Welcome → listen → streaming LLM → sentence-by-sentence TTS → barge-in |
+| IVR Transfer | `ivr-transfer` | Welcome → DTMF gate → voice → contact match → transfer |
+| Direct Dial | `direct-dial` | Welcome → voice → contact match → transfer |
+| OpenClaw | `openclaw` | Welcome → listen → forward to OpenClaw AI → TTS response |
 
-  // Common functionality
-  async playAudio(audioFile: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.channel.play(
-        { media: `sound:${audioFile}` },
-        (err: any, playback: any) => {
-          if (err) return reject(err);
-          playback.once('PlaybackFinished', () => resolve());
-        }
-      );
-    });
-  }
+### Creating a Custom Brain
 
-  async speak(text: string): Promise<void> {
-    // TODO: Integrate TTS service
-    console.log(`[Assistant] Speaking: ${text}`);
-  }
-
-  async transferCall(extension: string): Promise<void> {
-    console.log(`[Assistant] Transferring to ${extension}`);
-    // Implement transfer logic using ARI
-  }
-
-  async hangup(): Promise<void> {
-    this.channel.hangup((err: any) => {
-      if (err) console.error('Hangup error:', err);
-    });
-  }
-
-  getState(): AssistantState {
-    return this.state;
-  }
-
-  setState(state: AssistantState): void {
-    console.log(`[Assistant] State: ${this.state} → ${state}`);
-    this.state = state;
-  }
-
-  // Abstract methods - must be implemented by subclasses
-  abstract onCallStart(channel: any, callerId: string, extension: string): Promise<void>;
-  abstract onTranscription(text: string, isFinal: boolean): Promise<void>;
-  abstract onDTMFInput(digit: string): Promise<void>;
-  abstract onCallEnd(channel: any): Promise<void>;
-}
-```
-
-### Step 3: Create Assistant Factory
-
-**File:** `core/AssistantFactory.ts`
+1. Create `assistants/brains/MyCustomBrain.ts`:
 
 ```typescript
-import { IAssistant } from '../assistants/base/AssistantInterface';
-import { DefaultAssistant } from '../assistants/default/DefaultAssistant';
-import { CustomerServiceAssistant } from '../assistants/customer-service/CustomerServiceAssistant';
-import { SalesAssistant } from '../assistants/sales/SalesAssistant';
+const { AssistantState } = require("../base/AssistantTypes");
+import type { IBrain, IBrainHarness } from "../base/BrainTypes";
 
-export class AssistantFactory {
-  /**
-   * Create assistant based on extension routing
-   */
-  static createFromExtension(extension: string, channel: any, ari: any): IAssistant {
-    const ext = parseInt(extension);
+class MyCustomBrain implements IBrain {
+  private harness!: IBrainHarness;
 
-    // Route by extension range
-    if (ext >= 100 && ext < 200) {
-      return new CustomerServiceAssistant(channel, ari);
-    } else if (ext >= 200 && ext < 300) {
-      return new SalesAssistant(channel, ari);
-    } else {
-      return new DefaultAssistant(channel, ari);
-    }
+  init(harness: IBrainHarness): void {
+    this.harness = harness;
   }
 
-  /**
-   * Create assistant by explicit type
-   */
-  static createByType(type: string, channel: any, ari: any): IAssistant {
-    switch (type.toLowerCase()) {
-      case 'customer-service':
-      case 'cs':
-        return new CustomerServiceAssistant(channel, ari);
-
-      case 'sales':
-        return new SalesAssistant(channel, ari);
-
-      case 'default':
-      default:
-        return new DefaultAssistant(channel, ari);
-    }
-  }
-
-  /**
-   * Create assistant based on caller ID (VIP routing, etc.)
-   */
-  static createFromCallerId(callerId: string, channel: any, ari: any): IAssistant {
-    // Check if VIP customer
-    if (this.isVIPCustomer(callerId)) {
-      return new CustomerServiceAssistant(channel, ari); // Priority routing
-    }
-
-    return new DefaultAssistant(channel, ari);
-  }
-
-  private static isVIPCustomer(callerId: string): boolean {
-    // TODO: Check database or CRM
-    return false;
-  }
-}
-```
-
-### Step 4: Update AriControllerServer
-
-**File:** `core/AriControllerServer.ts` (modifications)
-
-```typescript
-import { AssistantFactory } from './AssistantFactory';
-import { IAssistant } from '../assistants/base/AssistantInterface';
-
-class AriController {
-  private assistants: Map<string, IAssistant> = new Map();
-
-  handleStasisStart(event: any, channel: any) {
-    const { args } = event;
-    const [extension, callerId] = args;
-
-    console.log(`[AriController] New call: ${callerId} → ${extension}`);
-
-    // Create appropriate assistant
-    const assistant = AssistantFactory.createFromExtension(
-      extension,
-      channel,
-      this.ari
-    );
-
-    // Store assistant for this channel
-    this.assistants.set(channel.id, assistant);
-
-    // Let assistant handle call start
-    assistant.onCallStart(channel, callerId, extension);
-  }
-
-  handleTranscription(channelId: string, text: string, isFinal: boolean) {
-    const assistant = this.assistants.get(channelId);
-    if (assistant) {
-      assistant.onTranscription(text, isFinal);
-    }
-  }
-
-  handleDTMF(channelId: string, digit: string) {
-    const assistant = this.assistants.get(channelId);
-    if (assistant) {
-      assistant.onDTMFInput(digit);
-    }
-  }
-
-  handleStasisEnd(event: any, channel: any) {
-    const assistant = this.assistants.get(channel.id);
-    if (assistant) {
-      assistant.onCallEnd(channel);
-      this.assistants.delete(channel.id);
-    }
-  }
-}
-```
-
----
-
-## Creating Custom Assistants
-
-### Example: Customer Service Assistant
-
-**File:** `assistants/customer-service/CustomerServiceAssistant.ts`
-
-```typescript
-import { BaseAssistant } from '../base/BaseAssistant';
-import { AssistantState } from '../base/AssistantInterface';
-import config from './config.json';
-
-export class CustomerServiceAssistant extends BaseAssistant {
-  private conversationHistory: string[] = [];
-  private ticketId: string | null = null;
-
-  constructor(channel: any, ari: any) {
-    super(config, ari);
-    this.channel = channel;
-  }
-
-  async onCallStart(channel: any, callerId: string, extension: string): Promise<void> {
-    console.log(`[CS Assistant] Starting call from ${callerId}`);
-
-    // Play welcome message
-    await this.playAudio(this.config.prompts.welcome);
-
-    // Start listening
-    this.setState(AssistantState.LISTENING);
+  async onCallStart(callerId: string, extension: string): Promise<void> {
+    await this.harness.playAudio(this.harness.config.prompts.welcome);
+    this.harness.setState(AssistantState.LISTENING);
   }
 
   async onTranscription(text: string, isFinal: boolean): Promise<void> {
     if (!isFinal) return;
-
-    console.log(`[CS Assistant] User said: ${text}`);
-    this.conversationHistory.push(`User: ${text}`);
-
-    this.setState(AssistantState.PROCESSING);
-
-    // Intent recognition
-    const intent = this.recognizeIntent(text);
-
-    switch (intent) {
-      case 'help':
-        await this.handleHelp();
-        break;
-
-      case 'complaint':
-        await this.handleComplaint();
-        break;
-
-      case 'transfer':
-        await this.transferToHuman();
-        break;
-
-      default:
-        await this.handleUnknown();
-    }
-
-    this.setState(AssistantState.LISTENING);
+    await this.harness.speak("I heard: " + text);
   }
 
-  async onDTMFInput(digit: string): Promise<void> {
-    console.log(`[CS Assistant] DTMF: ${digit}`);
-
-    if (digit === '0') {
-      await this.transferToHuman();
-    }
-  }
-
-  async onCallEnd(channel: any): Promise<void> {
-    console.log(`[CS Assistant] Call ended`);
-
-    // Save conversation log
-    if (this.ticketId) {
-      this.saveConversation();
-    }
-
-    this.setState(AssistantState.IDLE);
-  }
-
-  // Private helper methods
-  private recognizeIntent(text: string): string {
-    const lower = text.toLowerCase();
-
-    if (lower.includes('help') || lower.includes('assist')) {
-      return 'help';
-    }
-    if (lower.includes('complaint') || lower.includes('problem')) {
-      return 'complaint';
-    }
-    if (lower.includes('speak') || lower.includes('human') || lower.includes('operator')) {
-      return 'transfer';
-    }
-
-    return 'unknown';
-  }
-
-  private async handleHelp(): Promise<void> {
-    this.setState(AssistantState.SPEAKING);
-    await this.playAudio('custom/cs_help_menu');
-  }
-
-  private async handleComplaint(): Promise<void> {
-    this.ticketId = this.createTicket();
-    this.setState(AssistantState.SPEAKING);
-    await this.speak(`I've created ticket ${this.ticketId} for your issue.`);
-  }
-
-  private async transferToHuman(): Promise<void> {
-    this.setState(AssistantState.TRANSFERRING);
-    await this.speak("Transferring you to a customer service representative.");
-    await this.transferCall('300'); // Transfer to CS queue
-  }
-
-  private async handleUnknown(): Promise<void> {
-    this.setState(AssistantState.SPEAKING);
-    await this.playAudio(this.config.prompts.error);
-  }
-
-  private createTicket(): string {
-    // TODO: Integrate with ticketing system
-    return `CS-${Date.now()}`;
-  }
-
-  private saveConversation(): void {
-    // TODO: Save to database
-    console.log('[CS Assistant] Saving conversation:', this.conversationHistory);
-  }
+  async onDTMFInput(digit: string): Promise<void> {}
+  async onCallEnd(): Promise<void> {}
+  destroy(): void {}
 }
+
+module.exports.MyCustomBrain = MyCustomBrain;
 ```
 
-### Configuration File
-
-**File:** `assistants/customer-service/config.json`
+2. Use it in any assistant's `config.json`:
 
 ```json
 {
-  "name": "Customer Service Assistant",
-  "language": "en-US",
-  "prompts": {
-    "welcome": "custom/cs_welcome",
-    "goodbye": "custom/cs_goodbye",
-    "error": "custom/cs_error",
-    "timeout": "custom/cs_timeout"
-  },
-  "behavior": {
-    "maxRetries": 3,
-    "timeoutSeconds": 30,
-    "silenceThresholdSeconds": 5
-  }
+  "name": "My Custom Assistant",
+  "brain": "my-custom",
+  "prompts": { "welcome": "custom/welcome" },
+  "behavior": { "maxRetries": 3, "timeoutSeconds": 30, "silenceThresholdSeconds": 5 }
 }
 ```
+
+The slug is auto-derived from the filename: `MyCustomBrain.ts` → `"my-custom"`.
+
+---
+
+## Shared Voice Intelligence
+
+BrainHarness provides voice-quality features that benefit **all brains** automatically, without any brain needing to implement them:
+
+### Filler Sound Filtering
+
+Non-word vocalizations (`um`, `uh`, `mm hmm`, `ah`, `oh`) are filtered before reaching the brain. This prevents brains from generating responses to meaningless sounds.
+
+Real words like "yes", "hello", "ok" are **not** filtered — only genuine non-word vocalizations.
+
+### Turn-End Debouncing
+
+STT often sends multiple rapid-fire final transcriptions for a single utterance (e.g., `"I want to book a"` then `"dentist appointment"` as two finals). BrainHarness debounces these into a single brain call.
+
+- Default debounce: `300ms` (configurable per-agent via `behavior.turnDebounceMs`)
+- Post-barge-in debounce: `500ms` (captures full utterance after interruption)
+
+### Barge-In Handling
+
+When the user speaks during bot speech:
+
+1. Rust RTP server detects speech via AEC3 + Silero VAD → fires `user_speaking` event
+2. ARI Controller cancels TTS playback → calls `cancelSpeaking()` on BrainHarness
+3. BrainHarness rejects pending `speak()` Promise with `BargeInError`
+4. Brain's streaming loop catches `BargeInError` and aborts gracefully
+5. BrainHarness notifies brain via `onBargeIn(text)` with the interrupting utterance
+6. Extended debounce window (500ms) captures the full interrupting utterance
+
+### Interim Transcription Passthrough
+
+Interim (non-final) transcriptions bypass all filtering and debouncing, passing directly to the brain. This is needed by brains like OpenClawBrain that process interim results.
+
+---
+
+## Routing
+
+### config/routing.json
+
+```json
+{
+  "defaultAssistant": "ivr-transfer",
+  "extensionRoutes": [
+    { "pattern": "10[0-9]", "assistant": "direct-dial" },
+    { "pattern": "20[0-9]", "assistant": "ivr-transfer" },
+    { "pattern": "30[0-9]", "assistant": "openclaw" }
+  ],
+  "callerIdRoutes": [
+    { "pattern": "\\+48.*", "assistant": "ivr-transfer" }
+  ]
+}
+```
+
+Patterns are regex. The factory tries routes in order, falls back to `defaultAssistant`.
+
+### AssistantFactory Methods
+
+```typescript
+// Route by extension (reads routing.json)
+AssistantFactory.createFromExtension("301", client, sessionId);
+// → matches "30[0-9]" → creates openclaw assistant
+
+// Route by caller ID
+AssistantFactory.createFromCallerId("+48123456789", client, sessionId);
+
+// Explicit type (bypasses routing.json)
+AssistantFactory.createByType("openclaw", client, sessionId);
+
+// Reload routing config after editing
+AssistantFactory.reloadRouting();
+```
+
+### Dynamic Discovery
+
+The factory automatically discovers assistants by scanning the `assistants/` directory. Any subfolder with a `*Assistant.ts` file is registered. Brains are discovered from `assistants/brains/*Brain.ts`. No imports or switch statements needed.
 
 ---
 
 ## Configuration
 
+### Assistant config.json
+
+Each assistant folder has a `config.json`:
+
+```json
+{
+  "name": "IVR Transfer",
+  "mode": "incoming",
+  "brain": "ivr-transfer",
+  "language": "en-US",
+  "prompts": {
+    "welcome": "custom/welcome_2",
+    "goodbye": "custom/goodbye",
+    "error": "custom/error",
+    "timeout": "custom/timeout",
+    "tryAgain": "custom/try_again"
+  },
+  "behavior": {
+    "maxRetries": 12,
+    "timeoutSeconds": 30,
+    "silenceThresholdSeconds": 5,
+    "transferDigit": "1",
+    "maxNoMatches": 12,
+    "tryAgainInterval": 3
+  },
+  "transfer": {
+    "destination": "100",
+    "trunk": "from-internal"
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `name` | Display name |
+| `mode` | `"incoming"` or `"outbound"` |
+| `brain` | Brain slug (optional — omit for classic assistant) |
+| `language` | Speech recognition language |
+| `prompts` | Audio file references (`sound:custom/...`) |
+| `behavior` | Retry counts, timeouts, DTMF settings |
+| `transfer` | Default transfer destination and trunk |
+| `campaign` | Campaign settings (outbound only) |
+
 ### Environment Variables
 
-Add to `.env`:
-
 ```env
-# Assistant Configuration
-DEFAULT_ASSISTANT=default
-ASSISTANT_ROUTING=extension-based  # Options: extension-based, caller-id-based, config-based
+# Default assistant for unmatched extensions
+DEFAULT_ASSISTANT=ivr-transfer
 
-# Extension → Assistant Routing
-ASSISTANT_EXT_100_199=customer-service
-ASSISTANT_EXT_200_299=sales
-ASSISTANT_EXT_300_399=technical-support
+# TTS service (required for brains that use speak())
+TTS_SERVICE=ws://localhost:5001
+TTS_VOICE=af_heart
+TTS_SPEED=1.0
 ```
 
 ---
 
-## Examples
+## Related Documentation
 
-### Routing Scenarios
-
-#### Scenario 1: Extension-Based Routing
-
-```typescript
-// Caller dials extension 105
-const assistant = AssistantFactory.createFromExtension('105', channel, ari);
-// Returns: CustomerServiceAssistant (100-199 range)
-```
-
-#### Scenario 2: Type-Based Routing
-
-```typescript
-// Explicitly create sales assistant
-const assistant = AssistantFactory.createByType('sales', channel, ari);
-// Returns: SalesAssistant
-```
-
-#### Scenario 3: Caller ID Based Routing
-
-```typescript
-// VIP customer calls
-const assistant = AssistantFactory.createFromCallerId('+15551234567', channel, ari);
-// Returns: CustomerServiceAssistant (priority routing)
-```
-
----
-
-## 📚 Related Documentation
-
-- [FreePBX Setup](freepbx-setup.md) - FreePBX configuration
-- [Dialplan Config](DIALPLAN-CONFIG.md) - Call routing setup
-- [Transcription Services](TRANSCRIPTION-SERVICES.md) - Speech-to-text backends
-
----
-
-## 💡 Best Practices
-
-1. **Keep assistants focused** - One assistant = one purpose
-2. **Use configuration files** - Don't hardcode prompts and behavior
-3. **Log conversations** - Essential for debugging and improving
-4. **Handle errors gracefully** - Always have fallback responses
-5. **Test thoroughly** - Mock the interface for unit tests
-6. **Document intents** - Keep a list of supported commands per assistant
-7. **Monitor performance** - Track response times and user satisfaction
-
----
-
-**Need help?** Check the [FreePBX community forums](https://community.freepbx.org/) or open an issue on GitHub.
+- [OpenClaw Integration](OPENCLAW-INTEGRATION.md) — Connect AriLink to OpenClaw AI agents
+- [Docker Setup](docker.md) — Run the full stack with Docker
+- [FreePBX Setup](freepbx-setup.md) — FreePBX configuration
+- [Dialplan Config](DIALPLAN-CONFIG.md) — Call routing setup
+- [Transcription Services](TRANSCRIPTION-SERVICES.md) — Speech-to-text backends

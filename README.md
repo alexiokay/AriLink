@@ -24,17 +24,18 @@ AriLink is a telephony platform built on Asterisk's ARI (Asterisk REST Interface
 
 ## Key Features
 
+- **LLM Voice Agent** - Full conversational AI via LlmChatBrain — streaming LLM responses with sentence-by-sentence TTS
+- **Barge-In** - Interrupt bot speech mid-sentence. AEC3 echo cancellation + Silero VAD eliminate false triggers
+- **Pluggable Brains** - Swap call logic via config: LLM Chat, IVR Transfer, Direct Dial, OpenClaw AI
+- **Local TTS** - Text-to-speech via Kokoro (82M params) — zero API cost, ~100ms latency
+- **Local STT** - Real-time transcription via Parakeet TDT (25 languages) or Whisper, with Google Cloud fallback
 - **Web Dashboard** - Full management UI with real-time service status, active calls, logs, and configuration
-- **Call Management** - Incoming and outgoing calls through Asterisk PBX with live transcription
-- **Campaign Engine** - Automated outbound dialing with configurable assistants and call scripts
-- **Speech-to-Text** - Real-time transcription using local AI models (Parakeet TDT, Whisper) or Google Cloud
-- **Pluggable Assistants** - Modular call logic (IVR transfer, direct dial, auto-dialer) with per-assistant configuration
-- **Built-in Softphone** - SIP softphone directly in the dashboard for testing and manual calls
+- **Campaign Engine** - Automated outbound dialing with configurable concurrency and call scripts
+- **OpenClaw Integration** - Bridge to OpenClaw AI agent ecosystem via Socket.IO
 - **Call History** - SQLite-backed call records with search and transcription playback
-- **SSH Terminal** - Remote PBX management directly from the dashboard
-- **File Manager** - Upload and manage Asterisk audio files (prompts, greetings) via SFTP
-- **Contact Management** - Voice-activated dialing using a contacts database
-- **Automatic Fallback** - Seamlessly switches between transcription providers on failure
+- **CLI Tool** - `arilink init/start/stop/status/logs` for Docker deployments
+- **Built-in Softphone** - SIP softphone directly in the dashboard for testing
+- **SSH Terminal & File Manager** - Remote PBX management and audio file uploads via SFTP
 
 <p align="center">
   <img src="./assets/softphone.png" alt="Built-in Softphone" width="220" />
@@ -52,39 +53,44 @@ flowchart TD
         SIO[Socket.IO]
     end
 
-    subgraph Engine["Node.js Engine"]
+    subgraph Core["Node.js Core"]
         CTRL[ARI Controller]
+        HARNESS[BrainHarness]
+        BRAINS["Brains<br/><small>LlmChat · IvrTransfer<br/>DirectDial · OpenClaw</small>"]
         CAMP[Campaign Engine]
-        HIST[Call History DB]
-        LOG[Log Collector]
+        HIST[Call History]
     end
 
     subgraph Audio["Rust RTP Server"]
-        RTP[RTP Listener :8000]
-        WS_BRIDGE[WebSocket Bridge]
+        RTP[RTP Receiver :8000]
+        AEC["AEC3 Echo Cancellation<br/>+ Silero VAD"]
     end
 
-    subgraph Transcription["Transcription Services"]
-        PKT[Parakeet TDT 0.6B]
+    subgraph AI["AI Services"]
+        PKT[Parakeet STT]
         WHSP[Whisper]
         GCS[Google Cloud Speech]
+        KOKORO[Kokoro TTS]
     end
 
-    PBX[Asterisk PBX] -->|ARI WebSocket| CTRL
+    PBX[Asterisk PBX] <-->|ARI WebSocket| CTRL
     PBX -->|RTP Audio| RTP
-    RTP --> WS_BRIDGE
-    WS_BRIDGE -->|Audio Stream| PKT
-    WS_BRIDGE -.->|Fallback| WHSP
-    WS_BRIDGE -.->|Fallback| GCS
-    PKT -->|Transcription| WS_BRIDGE
-    WS_BRIDGE -->|Results| CTRL
+    RTP --> AEC
+    AEC -->|Clean audio| PKT
+    AEC -.->|Fallback| WHSP
+    AEC -.->|Fallback| GCS
+    AEC -->|user_speaking| CTRL
+    PKT -->|Transcription| CTRL
+    CTRL --> HARNESS --> BRAINS
+    BRAINS -->|speak| KOKORO
+    KOKORO -->|slin16 audio| PBX
     CTRL --> HIST
-    CTRL --> LOG
     CAMP --> CTRL
+    SIO <--> Core
     SIO <-->|Real-time| UI
     API --> HIST
-    API --> LOG
-    SIO <--> Engine
+
+    BRAINS <-.->|Socket.IO| OC[OpenClaw AI]
 ```
 
 ### Core Components
@@ -114,11 +120,25 @@ Interfaces with Asterisk PBX via ARI:
 <details>
 <summary><b>Rust RTP Server</b></summary>
 
-High-performance audio pipeline:
+High-performance audio pipeline with voice intelligence:
 - Receives RTP audio from Asterisk ExternalMedia channels
+- **AEC3 echo cancellation** — WebRTC-grade, 30-40dB attenuation with adaptive threshold
+- **Silero VAD** — neural speech detection during TTS playback (barge-in trigger)
+- **RMS gate** — filters noise below threshold before sending to STT
 - Per-session audio routing with codec handling (slin16, Opus)
-- Forwards audio to transcription services via WebSocket
-- Automatic fallback between transcription providers
+- Forwards clean audio to transcription services via WebSocket
+
+</details>
+
+<details>
+<summary><b>Text-to-Speech (Kokoro)</b></summary>
+
+Local TTS service for zero-latency, zero-cost speech synthesis:
+- **Kokoro 82M** — lightweight neural TTS model
+- Outputs 16kHz slin16 PCM directly for Asterisk playback
+- Sentence-by-sentence streaming — start speaking before LLM finishes
+- Configurable voice, speed, and language
+- WebSocket protocol for low-latency communication
 
 </details>
 
@@ -126,11 +146,24 @@ High-performance audio pipeline:
 <summary><b>Transcription Providers</b></summary>
 
 Multiple backend support with automatic failover:
-- **Parakeet TDT 0.6B-v3** (recommended) - 25 languages, 2000x+ real-time speed, runs on GPU
-- **Whisper** - Slower but highly accurate
-- **Google Cloud Speech** - Cloud-based fallback (requires API credentials)
+- **Parakeet TDT 0.6B-v3** (recommended) — 25 languages, 2000x+ real-time speed, runs on GPU
+- **Whisper** — Slower but highly accurate
+- **Google Cloud Speech** — Cloud-based fallback (requires API credentials)
 - Streaming transcription with interim and final results
 - Priority chain configured via `TRANSCRIPTION_SERVICES` env var
+
+</details>
+
+<details>
+<summary><b>Pluggable Brains</b></summary>
+
+Modular call logic — swap behavior via `config.json` without changing code:
+- **LlmChatBrain** — Full conversational AI (streaming LLM + sentence-by-sentence TTS + barge-in)
+- **IvrTransferBrain** — DTMF gate → voice → contact match → transfer
+- **DirectDialBrain** — Voice → contact match → direct transfer
+- **OpenClawBrain** — Bridge to OpenClaw AI agent ecosystem
+- **BrainHarness** — shared voice intelligence (filler filtering, turn debouncing, barge-in handling) benefits all brains automatically
+- Create custom brains by implementing the `IBrain` interface
 
 </details>
 
@@ -170,13 +203,16 @@ The fastest way to try AriLink — no Node.js, Python, or Asterisk installation 
 docker compose up -d
 ```
 
-This starts Asterisk + AI transcription + Dashboard. Open [localhost:3011](http://localhost:3011).
+This starts 4 services: **Asterisk** (PBX), **Parakeet** (STT), **Kokoro** (TTS), and **AriLink** (dashboard + engine). Open [localhost:3011](http://localhost:3011).
 
 **Test with a SIP phone** (Zoiper, Linphone): server `localhost:5060`, extension `1001`, password `demo1001`.
 
 ```bash
-# With GPU transcription (NVIDIA)
+# With GPU acceleration (NVIDIA) — ~1000x faster STT + TTS
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+
+# With Rust RTP server (AEC3 echo cancellation + Silero VAD for barge-in)
+docker compose --profile rust-rtp up -d
 
 # With live code editing (mount local source)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
@@ -254,6 +290,9 @@ The system uses a central `.env` file. Key settings:
 |----------|-----------|
 | **PBX** | `PBX_IP`, `ASTERISK_LOGIN`, `ASTERISK_PASSWORD` |
 | **Transcription** | `TRANSCRIPTION_SERVICES`, `AUTO_START_TRANSCRIPTION`, `SPEECH_LANG` |
+| **TTS** | `TTS_SERVICE`, `TTS_VOICE`, `TTS_SPEED`, `TTS_LANG` |
+| **LLM** | `LLM_PROVIDER`, `LLM_MODEL`, `LLM_API_KEY`, `LLM_ENDPOINT` |
+| **Rust RTP** | `USE_RUST_RTP`, `RUST_SERVER_URL` |
 | **Server** | `PORT` (default 3011), `LISTENER_SERVER`, `EXTERNAL_HOST` |
 | **Assistants** | `DEFAULT_ASSISTANT`, per-assistant `config.json` files |
 
@@ -263,22 +302,26 @@ See [`.env.example`](.env.example) for all options with documentation.
 
 - **Frontend**: Nuxt 4, Vue 3.5, @nuxt/ui, Socket.IO client, SIP.js (softphone)
 - **Backend**: Nitro (Node.js), TypeScript, Socket.IO, ari-client, better-sqlite3
-- **Audio**: Rust RTP server (slin16, Opus), Asterisk ExternalMedia
-- **Transcription**: Parakeet TDT 0.6B-v3 (NeMo), Whisper, Google Cloud Speech
-- **Infrastructure**: Asterisk PBX (FreePBX), SSH/SFTP for remote management
+- **Audio**: Rust RTP server with AEC3 echo cancellation + Silero VAD (slin16, Opus)
+- **STT**: Parakeet TDT 0.6B-v3 (NeMo), Whisper, Google Cloud Speech
+- **TTS**: Kokoro 82M (local, 16kHz slin16 output)
+- **Infrastructure**: Asterisk PBX (FreePBX), Docker Compose, `arilink` CLI
 
 ## Roadmap
 
-- ~~Web UI for monitoring and management~~ **Done**
-- ~~Database persistence for call records~~ **Done**
-- ~~Additional speech recognition providers~~ **Done**
-- Additional providers: Scribe (ElevenLabs), Azure Speech, Deepgram
-- Call analytics and reporting
-- ~~One-click deployment (Docker)~~ **Done**
-- Railway / cloud deployment
-- Transcription management GUI (model downloads, provider config)
+- ~~Web dashboard with live calls, campaigns, call history~~ **Done**
+- ~~Local STT (Parakeet) + TTS (Kokoro) — zero API cost~~ **Done**
+- ~~Pluggable brain architecture (BrainHarness + IBrain)~~ **Done**
+- ~~LLM conversational voice agent (LlmChatBrain)~~ **Done**
+- ~~Barge-in with AEC3 echo cancellation + Silero VAD~~ **Done**
+- ~~Docker Compose + CLI tool~~ **Done**
+- ~~OpenClaw AI integration~~ **Done**
+- MCP tool use in LlmChatBrain (calendar, CRM, SMS)
+- Call analytics and latency metrics
+- WebRTC softphone improvements
+- Additional STT providers: Deepgram, Azure Speech, ElevenLabs Scribe
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the full roadmap.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the full product roadmap.
 
 ## License
 

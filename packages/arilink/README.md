@@ -1,4 +1,4 @@
-# @arilink/openclaw-channel
+# @openclaw/arilink
 
 Phone calls for OpenClaw via Asterisk PBX. Self-hosted alternative to Twilio — no per-minute charges.
 
@@ -13,7 +13,7 @@ Phone calls for OpenClaw via Asterisk PBX. Self-hosted alternative to Twilio —
 
 ```bash
 # In your OpenClaw directory
-openclaw plugins install @arilink/openclaw-channel
+openclaw plugins install @openclaw/arilink
 ```
 
 ## Configure

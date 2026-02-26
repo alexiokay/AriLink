@@ -1,5 +1,5 @@
 {
-  "name": "@arilink/openclaw-channel",
+  "name": "@openclaw/arilink",
   "version": "1.0.0",
   "description": "AriLink channel plugin for OpenClaw — make and receive phone calls via Asterisk PBX with local AI transcription",
   "type": "module",
@@ -21,7 +21,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/AriLink/arilink.git",
-    "directory": "packages/openclaw-channel"
+    "directory": "packages/arilink"
   },
   "peerDependencies": {
     "openclaw": ">=2026.2.13"
@@ -44,7 +44,7 @@
       "aliases": ["asterisk", "pbx", "sip"]
     },
     "install": {
-      "npmSpec": "@arilink/openclaw-channel",
+      "npmSpec": "@openclaw/arilink",
       "localPath": ".",
       "defaultChoice": "npm"
     }

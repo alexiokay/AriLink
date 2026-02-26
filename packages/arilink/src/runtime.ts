@@ -22,7 +22,7 @@ export interface AriLinkConfig {
 }
 
 const DEFAULTS: AriLinkConfig = {
-  arilinkUrl: "http://localhost:3011",
+  arilinkUrl: "http://127.0.0.1:3011",
   autoAnswer: true,
   greeting: "Hello, how can I help you today?",
   ttsProvider: "asterisk",
@@ -74,7 +74,7 @@ export function connect(config: AriLinkConfig): Socket {
   _config = config;
 
   _socket = io(config.arilinkUrl, {
-    transports: ["websocket", "polling"],
+    transports: ["polling", "websocket"],
     reconnection: true,
     reconnectionDelay: 2000,
     reconnectionDelayMax: 10000,
