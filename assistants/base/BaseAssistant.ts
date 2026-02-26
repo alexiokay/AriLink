@@ -137,6 +137,8 @@ abstract class BaseAssistant extends EventEmitter implements IAssistant {
 
   setState(state: AssistantState, detail?: string): void {
     const prev = this.state;
+    // Skip duplicate state transitions — prevents double "Listening" in dashboard
+    if (prev === state && !detail) return;
     this.state = state;
     console.log(`[${this.config.name}][Session ${this.sessionId}] State: ${prev} → ${state}${detail ? ` (${detail})` : ""}`);
     this.emit("stateChange", { sessionId: this.sessionId, prev, state, detail });

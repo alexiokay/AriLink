@@ -26,6 +26,10 @@ pub struct Config {
     /// Audio buffer flush interval in milliseconds
     #[arg(long, env = "BUFFER_FLUSH_MS", default_value_t = 100)]
     pub buffer_flush_ms: u64,
+
+    /// UDP address for outbound TTS RTP (ExternalMedia OUT)
+    #[arg(long, env = "RTP_TTS_ADDR", default_value = "0.0.0.0:8001")]
+    pub rtp_tts_addr: String,
 }
 
 impl Config {

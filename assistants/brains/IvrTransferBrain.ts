@@ -23,7 +23,7 @@ class IvrTransferBrain implements IBrain {
   init(harness: IBrainHarness): void {
     this.harness = harness;
 
-    const contacts = (harness as any).getContacts?.() || null;
+    const contacts = harness.getContacts?.() || null;
     this.contactMatcher = new ContactMatcher(contacts);
     this.retryManager = new RetryManager({
       maxRetries: harness.config.behavior.maxRetries || 3,

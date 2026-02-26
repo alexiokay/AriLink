@@ -546,10 +546,9 @@ async function confirmDelete() {
 
   // Pre-check routing references
   try {
-    const routing = await $fetch<{ defaultAssistant?: string; extensionRoutes?: any[]; callerIdRoutes?: any[] }>("/api/routing");
+    const routing = await $fetch<{ extensionRoutes?: any[]; callerIdRoutes?: any[] }>("/api/routing");
     const slug = selected.value.slug;
     const warnings: string[] = [];
-    if (routing.defaultAssistant === slug) warnings.push("Default assistant for incoming calls");
     for (const r of routing.extensionRoutes || []) {
       if (r.assistant === slug) warnings.push(`Extension route: ${r.pattern}`);
     }

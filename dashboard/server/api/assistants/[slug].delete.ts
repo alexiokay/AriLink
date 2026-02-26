@@ -31,7 +31,6 @@ export default defineEventHandler(async (event) => {
   if (existsSync(routingPath)) {
     try {
       const routing = JSON.parse(readFileSync(routingPath, "utf-8"));
-      if (routing.defaultAssistant === slug) usedIn.push("default assistant");
       for (const r of routing.extensionRoutes || []) {
         if (r.assistant === slug) usedIn.push(`extension route: ${r.pattern}`);
       }

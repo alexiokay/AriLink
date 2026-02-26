@@ -9,10 +9,7 @@ use crate::rtp::RtpPacket;
 use crate::session::SessionManager;
 
 /// Run the RTP UDP listener. Receives packets, decodes audio, routes to sessions.
-pub async fn run(listen_addr: &str, session_manager: &Arc<SessionManager>) -> anyhow::Result<()> {
-    let socket = UdpSocket::bind(listen_addr).await?;
-    tracing::info!("RTP UDP listener bound to {}", listen_addr);
-
+pub async fn run(socket: Arc<UdpSocket>, session_manager: &Arc<SessionManager>) -> anyhow::Result<()> {
     let mut buf = [0u8; 2048]; // Max RTP packet fits in MTU (~1500 bytes)
     let mut processors: HashMap<String, AudioProcessor> = HashMap::new();
 
@@ -41,8 +38,8 @@ pub async fn run(listen_addr: &str, session_manager: &Arc<SessionManager>) -> an
                 match session_manager.assign_unbound_session(&src) {
                     Some(id) => {
                         tracing::info!(
-                            "Auto-bound session {} to source {}",
-                            id, src
+                            "Auto-bound session {} to source {} (PT={}, payload_len={})",
+                            id, src, packet.payload_type(), payload.len()
                         );
                         id
                     }
@@ -73,9 +70,17 @@ pub async fn run(listen_addr: &str, session_manager: &Arc<SessionManager>) -> an
                     .bytes_received
                     .fetch_add(pcm_data.len() as u64, Ordering::Relaxed);
 
-                // Send to session's transcription pipeline
-                if session.audio_tx.try_send(pcm_data).is_err() {
-                    tracing::trace!("Session {} audio channel full, dropping packet", session_id);
+                // Route audio: through AEC if enabled, otherwise direct to transcription
+                if let Some(ref aec_handle) = session.aec_handle {
+                    // AEC thread will cancel echo and forward clean audio to audio_tx
+                    if aec_handle.mic_tx.send(pcm_data).is_err() {
+                        tracing::trace!("Session {} AEC mic channel closed", session_id);
+                    }
+                } else {
+                    // Direct to transcription pipeline (no AEC)
+                    if session.audio_tx.try_send(pcm_data).is_err() {
+                        tracing::trace!("Session {} audio channel full, dropping packet", session_id);
+                    }
                 }
             }
         } else {

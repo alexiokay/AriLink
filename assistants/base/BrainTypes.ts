@@ -33,6 +33,9 @@ export interface IBrainHarness {
   // TTS — synthesize text and play to caller
   speak(text: string): Promise<void>;
 
+  /** Cancel current speech + clear queue. Rejects pending speak() with BargeInError. */
+  cancelSpeaking(): void;
+
   // Call control
   transferCall(endpoint: string): Promise<void>;
   hangup(): Promise<void>;
@@ -48,6 +51,9 @@ export interface IBrainHarness {
   // Context
   readonly sessionId: string;
   readonly config: AssistantConfig;
+
+  // Data access
+  getContacts(): any;
 }
 
 /**
@@ -77,8 +83,10 @@ export interface IBrain {
   /** Called when TTS playback finishes (brain can resume listening) */
   onSpeakingDone?(): void;
 
+  /** Called when the user interrupts bot speech (barge-in). Text is the interrupting utterance. */
+  onBargeIn?(text: string): void;
+
   /** Cleanup */
   destroy(): void;
 }
 
-module.exports = {};

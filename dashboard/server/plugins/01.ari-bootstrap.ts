@@ -28,6 +28,9 @@ export default defineNitroPlugin(async (nitroApp) => {
   }
   P.__ariBootstrapped = true;
 
+  // Materialize Google credentials from base64 env var → file on disk
+  materializeGoogleCredentials();
+
   const config = useRuntimeConfig();
   const rootDir = config.projectRoot as string;
 
@@ -68,6 +71,7 @@ export default defineNitroPlugin(async (nitroApp) => {
   serverState.callHistory = engine.getCallHistory();
   serverState.dashboard = engine.getDashboard();
   serverState.rustProcess = engine.getRustProcess();
+  serverState.dockerManager = engine.getDockerManager();
 
   // Store engine ref on process for cleanup
   P.__engine = engine;
@@ -81,5 +85,6 @@ export default defineNitroPlugin(async (nitroApp) => {
     serverState.callHistory = null;
     serverState.dashboard = null;
     serverState.rustProcess = null;
+    serverState.dockerManager = null;
   });
 });

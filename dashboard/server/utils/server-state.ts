@@ -7,6 +7,7 @@ interface ServerState {
   dashboard: any | null;
   rustProcess: any | null;
   autoDialer: any | null;
+  dockerManager: any | null;
 }
 
 export const serverState: ServerState = {
@@ -15,4 +16,5 @@ export const serverState: ServerState = {
   dashboard: null,
   rustProcess: null,
   autoDialer: null,
+  dockerManager: null,
 };

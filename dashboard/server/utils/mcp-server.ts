@@ -309,7 +309,7 @@ function registerTools(server: McpServer) {
     const rootDir = getProjectRoot();
     const routingPath = resolve(rootDir, "config", "routing.json");
     if (!existsSync(routingPath)) {
-      return ok({ defaultAssistant: "ivr-transfer", extensionRoutes: [], callerIdRoutes: [] });
+      return ok({ extensionRoutes: [], callerIdRoutes: [] });
     }
     return ok(JSON.parse(readFileSync(routingPath, "utf-8")));
   });
@@ -398,9 +398,8 @@ function registerTools(server: McpServer) {
   });
 
   server.registerTool("update_routing", {
-    description: "Update incoming call routing rules",
+    description: "Update incoming call routing rules (extension and caller ID pattern → assistant mappings)",
     inputSchema: {
-      defaultAssistant: z.string().describe("Default assistant slug for unmatched calls"),
       extensionRoutes: z.array(z.object({
         pattern: z.string().describe("Extension pattern (regex)"),
         assistant: z.string().describe("Assistant slug"),
@@ -410,14 +409,13 @@ function registerTools(server: McpServer) {
         assistant: z.string().describe("Assistant slug"),
       })).optional().describe("Caller ID-based routing rules"),
     },
-  }, async ({ defaultAssistant, extensionRoutes, callerIdRoutes }) => {
+  }, async ({ extensionRoutes, callerIdRoutes }) => {
     const rootDir = getProjectRoot();
     const routingPath = resolve(rootDir, "config", "routing.json");
     const dir = resolve(rootDir, "config");
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
     const data = {
-      defaultAssistant,
       extensionRoutes: extensionRoutes || [],
       callerIdRoutes: callerIdRoutes || [],
     };

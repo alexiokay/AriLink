@@ -19,8 +19,9 @@
             <span class="font-medium text-(--ui-text-muted)">{{ svc.label }}</span>
           </div>
           <div class="flex items-center gap-1.5">
+            <!-- Reconnect (software-level: reconnect WebSocket/TCP) -->
             <UButton
-              v-if="serviceAction(key as string)"
+              v-if="hasReconnect(key as string)"
               icon="i-lucide-refresh-cw"
               color="neutral"
               variant="ghost"
@@ -28,6 +29,19 @@
               :loading="svc.status === 'connecting'"
               :title="`Reconnect ${svc.label}`"
               @click="reconnectService(key as string)"
+            />
+            <!-- Skeleton: Docker button loading -->
+            <div v-if="docker.loading.value && docker.dockerSlug(key as string)" class="size-7 rounded bg-(--ui-bg-accented) animate-pulse" />
+            <!-- Restart container (Docker-level) -->
+            <UButton
+              v-else-if="docker.status.value.available && docker.dockerSlug(key as string)"
+              icon="i-lucide-power"
+              color="warning"
+              variant="ghost"
+              size="xs"
+              :loading="docker.restarting.value[key as string]"
+              :title="`Restart ${svc.label} container`"
+              @click="restartContainer(key as string)"
             />
             <UBadge
               :label="svc.status"
@@ -41,6 +55,19 @@
         <!-- Connected: show address -->
         <p v-if="svc.detail && !isErrorStatus(svc.status)" class="mt-2 text-sm text-(--ui-text-dimmed) font-mono truncate">
           {{ svc.detail }}
+        </p>
+
+        <!-- Container info skeleton -->
+        <div v-if="docker.loading.value && docker.dockerSlug(key as string)" class="mt-1 h-4 w-48 rounded bg-(--ui-bg-accented) animate-pulse" />
+        <!-- Container info (Docker) -->
+        <p v-else-if="docker.status.value.available && docker.containerFor(key as string)" class="mt-1 text-xs text-(--ui-text-dimmed)">
+          Container: {{ docker.containerFor(key as string)!.state }}
+          <span v-if="docker.containerFor(key as string)!.health !== 'none' && docker.containerFor(key as string)!.health !== 'unknown'">
+            ({{ docker.containerFor(key as string)!.health }})
+          </span>
+          <span v-if="docker.containerFor(key as string)!.uptime">
+            &middot; {{ docker.containerFor(key as string)!.uptime }}
+          </span>
         </p>
 
         <!-- Error: show parsed message + hint -->
@@ -77,6 +104,10 @@
 
 <script setup lang="ts">
 const { activeCalls, services, emit } = useSocket();
+const docker = useDocker();
+
+onMounted(() => docker.startPolling(15000));
+onUnmounted(() => docker.stopPolling());
 
 function statusColor(status: string): "success" | "error" | "neutral" | "warning" {
   if (status === "ok" || status === "connected") return "success";
@@ -96,8 +127,8 @@ function serviceIcon(key: string): string {
   return icons[key] || "i-lucide-circle";
 }
 
-function serviceAction(key: string): boolean {
-  return key === "asterisk" || key === "transcription" || key === "rustRtp";
+function hasReconnect(key: string): boolean {
+  return key === "asterisk" || key === "transcription" || key === "rustRtp" || key === "tts";
 }
 
 function reconnectService(key: string) {
@@ -105,7 +136,21 @@ function reconnectService(key: string) {
     emit("dashboard:reconnectAri");
   } else if (key === "transcription" || key === "rustRtp") {
     emit("dashboard:reconnectTranscription");
+  } else if (key === "tts") {
+    emit("dashboard:reconnectTts");
   }
+}
+
+function restartContainer(key: string) {
+  const slug = docker.dockerSlug(key);
+  if (!slug) return;
+  docker.restarting.value[key] = true;
+  emit("dashboard:restartContainer", { service: slug });
+  // Clear loading after a delay — real status comes via service events
+  setTimeout(() => {
+    docker.restarting.value[key] = false;
+    docker.fetchStatus();
+  }, 8000);
 }
 
 function isErrorStatus(status: string): boolean {

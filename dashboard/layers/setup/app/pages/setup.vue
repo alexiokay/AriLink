@@ -1,32 +1,34 @@
 <template>
-  <div class="min-h-screen bg-(--ui-bg) flex justify-center p-4 pt-[8vh]">
-    <div class="w-full max-w-2xl">
+  <div class="min-h-screen bg-(--ui-bg) flex justify-center p-6 pt-[6vh]">
+    <div class="setup-container w-full flex flex-col items-center" :class="step === 0 && !showAutoConfig ? 'max-w-5xl' : 'max-w-2xl'">
       <!-- Header -->
-      <div class="text-center mb-8">
-        <div class="flex items-center justify-center gap-3 mb-2">
-          <UIcon name="i-lucide-radio" class="size-10 text-(--ui-primary)" />
-          <h1 class="text-3xl font-bold text-(--ui-text-highlighted)">AriLink</h1>
+      <header class="text-center mb-8">
+        <div class="flex items-center justify-center gap-3 mb-1">
+          <div class="bg-(--ui-primary)/10 p-2 rounded-xl flex">
+            <UIcon name="i-lucide-radio" class="size-8 text-(--ui-primary)" />
+          </div>
+          <h1 class="text-3xl font-bold tracking-tight text-(--ui-text-highlighted)">AriLink</h1>
         </div>
-        <p class="text-sm text-(--ui-text-muted)">Setup Wizard</p>
-      </div>
+        <p class="text-(--ui-text-muted) font-medium uppercase tracking-[0.2em] text-[10px]">Setup Wizard</p>
+      </header>
 
-      <UCard>
+      <UCard class="w-full shadow-2xl !rounded-2xl overflow-hidden">
         <template #header>
           <div class="flex items-center justify-between flex-wrap gap-2">
-            <span class="font-semibold text-(--ui-text-highlighted)">
-              {{ showAutoConfig && step === 0 ? 'Auto-Configure' : stepLabels[step] }}
-            </span>
+            <h2 class="text-sm font-semibold text-(--ui-text-muted) uppercase tracking-wider">
+              {{ showAutoConfig && step === 0 ? 'Auto-Configure' : `Step ${step + 1}: ${stepLabels[step]}` }}
+            </h2>
             <!-- Step indicator (hidden only on auto-configure form) -->
-            <div v-if="!(showAutoConfig && step === 0)" class="flex items-center bg-(--ui-bg-elevated) rounded-lg p-0.5">
+            <div v-if="!(showAutoConfig && step === 0)" class="flex gap-1.5">
               <button
                 v-for="(s, i) in stepLabels"
                 :key="i"
-                class="px-2 py-1 text-xs font-medium rounded-md transition-all"
+                class="w-6 h-6 flex items-center justify-center rounded text-[10px] transition-all"
                 :class="step === i
-                  ? 'bg-(--ui-bg) text-(--ui-text-highlighted) shadow-sm'
+                  ? 'bg-(--ui-primary) text-black font-bold'
                   : i <= maxReachableStep
-                    ? 'text-(--ui-text-muted) hover:text-(--ui-text)'
-                    : 'text-(--ui-text-dimmed) cursor-not-allowed'"
+                    ? 'bg-(--ui-bg-elevated) text-(--ui-text-muted) hover:text-(--ui-text) font-medium'
+                    : 'bg-(--ui-bg-elevated) text-(--ui-text-dimmed) cursor-not-allowed font-medium'"
                 :disabled="i > maxReachableStep"
                 @click="i <= maxReachableStep && (step = i)"
               >
@@ -46,8 +48,9 @@
           </div>
         </template>
 
+        <Transition name="step" mode="out-in">
         <!-- ═══ Step 0: Welcome ═══ -->
-        <div v-if="step === 0" class="space-y-6 text-center">
+        <div v-if="step === 0" key="0" class="space-y-6">
 
           <!-- ── Auto-Configure Panel ── -->
           <template v-if="showAutoConfig">
@@ -177,94 +180,122 @@
 
           <!-- ── Normal Welcome ── -->
           <template v-else>
-            <div class="space-y-3 py-4">
-              <UIcon name="i-lucide-wand-sparkles" class="size-12 text-(--ui-primary) mx-auto" />
-              <h2 class="text-xl font-semibold text-(--ui-text-highlighted)">Welcome to AriLink</h2>
-              <p class="text-sm text-(--ui-text-muted) max-w-md mx-auto">
-                This wizard will connect AriLink to your Asterisk/FreePBX server. We'll walk you through each step — no prior ARI experience needed.
-              </p>
-            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-start">
+              <!-- Left: Welcome text + CTA -->
+              <div class="flex flex-col justify-center h-full space-y-8">
+                <div>
+                  <div class="inline-flex items-center justify-center p-3 mb-6 bg-(--ui-primary)/10 rounded-2xl">
+                    <UIcon name="i-lucide-wand-sparkles" class="size-10 text-(--ui-primary)" />
+                  </div>
+                  <h3 class="text-3xl font-bold mb-4 text-(--ui-text-highlighted) tracking-tight">Welcome to AriLink</h3>
+                  <p class="text-(--ui-text-muted) text-lg leading-relaxed">
+                    This wizard will connect AriLink to your Asterisk or FreePBX server seamlessly. We'll guide you through the configuration process — no prior ARI experience required.
+                  </p>
+                </div>
+                <div>
+                  <UButton
+                    label="Get Started"
+                    icon="i-lucide-arrow-right"
+                    trailing
+                    color="primary"
+                    size="xl"
+                    class="w-full sm:w-auto shadow-lg"
+                    @click="step = 1"
+                  />
+                </div>
+              </div>
 
-            <!-- PBX type selector -->
-            <div class="mx-auto max-w-md space-y-3">
-              <p class="text-xs font-semibold uppercase tracking-wider text-(--ui-text-muted)">What are you running?</p>
-              <div class="flex gap-3">
-                <button
-                  class="flex-1 p-3 rounded-lg border-2 transition-all text-left"
-                  :class="form.pbxType === 'freepbx'
-                    ? 'border-(--ui-primary) bg-(--ui-primary)/5'
-                    : 'border-(--ui-border) hover:border-(--ui-text-dimmed)'"
-                  @click="form.pbxType = 'freepbx'"
-                >
-                  <div class="flex items-center gap-2 mb-1">
-                    <UIcon name="i-lucide-layout-dashboard" class="size-4 text-(--ui-primary)" />
-                    <span class="text-sm font-semibold text-(--ui-text-highlighted)">FreePBX</span>
+              <!-- Right: Environment selector + Prerequisites -->
+              <div class="flex flex-col gap-6">
+                <!-- Environment selector -->
+                <div class="bg-(--ui-bg-elevated)/50 border border-(--ui-border) rounded-xl p-6">
+                  <p class="text-[10px] uppercase tracking-widest font-bold text-(--ui-text-dimmed) mb-4">Select your environment</p>
+                  <div class="grid grid-cols-1 gap-3">
+                    <button
+                      class="flex items-center text-left p-3 rounded-lg border transition-all group"
+                      :class="form.pbxType === 'freepbx'
+                        ? 'border-(--ui-primary) bg-(--ui-primary)/5'
+                        : 'border-(--ui-border) hover:border-(--ui-text-dimmed)'"
+                      @click="form.pbxType = 'freepbx'"
+                    >
+                      <div class="p-2 rounded-md mr-3 shrink-0" :class="form.pbxType === 'freepbx' ? 'bg-(--ui-primary)/20' : 'bg-(--ui-bg-elevated)'">
+                        <UIcon name="i-lucide-layout-dashboard" class="size-5" :class="form.pbxType === 'freepbx' ? 'text-(--ui-primary)' : 'text-(--ui-text-muted)'" />
+                      </div>
+                      <div>
+                        <p class="font-bold text-sm text-(--ui-text-highlighted)">FreePBX</p>
+                        <p class="text-[11px] text-(--ui-text-muted)">Asterisk with FreePBX GUI</p>
+                      </div>
+                      <div v-if="form.pbxType === 'freepbx'" class="ml-auto">
+                        <UIcon name="i-lucide-check-circle-2" class="size-5 text-(--ui-primary)" />
+                      </div>
+                    </button>
+                    <button
+                      class="flex items-center text-left p-3 rounded-lg border transition-all group"
+                      :class="form.pbxType === 'asterisk'
+                        ? 'border-(--ui-primary) bg-(--ui-primary)/5'
+                        : 'border-(--ui-border) hover:border-(--ui-text-dimmed) opacity-70 hover:opacity-100'"
+                      @click="form.pbxType = 'asterisk'"
+                    >
+                      <div class="p-2 rounded-md mr-3 shrink-0" :class="form.pbxType === 'asterisk' ? 'bg-(--ui-primary)/20' : 'bg-(--ui-bg-elevated)'">
+                        <UIcon name="i-lucide-terminal" class="size-5" :class="form.pbxType === 'asterisk' ? 'text-(--ui-primary)' : 'text-(--ui-text-muted)'" />
+                      </div>
+                      <div>
+                        <p class="font-bold text-sm text-(--ui-text-highlighted)">Plain Asterisk</p>
+                        <p class="text-[11px] text-(--ui-text-muted)">Asterisk without GUI</p>
+                      </div>
+                      <div v-if="form.pbxType === 'asterisk'" class="ml-auto">
+                        <UIcon name="i-lucide-check-circle-2" class="size-5 text-(--ui-primary)" />
+                      </div>
+                    </button>
                   </div>
-                  <p class="text-xs text-(--ui-text-muted)">Asterisk with FreePBX GUI</p>
-                </button>
-                <button
-                  class="flex-1 p-3 rounded-lg border-2 transition-all text-left"
-                  :class="form.pbxType === 'asterisk'
-                    ? 'border-(--ui-primary) bg-(--ui-primary)/5'
-                    : 'border-(--ui-border) hover:border-(--ui-text-dimmed)'"
-                  @click="form.pbxType = 'asterisk'"
-                >
-                  <div class="flex items-center gap-2 mb-1">
-                    <UIcon name="i-lucide-terminal" class="size-4 text-(--ui-primary)" />
-                    <span class="text-sm font-semibold text-(--ui-text-highlighted)">Plain Asterisk</span>
-                  </div>
-                  <p class="text-xs text-(--ui-text-muted)">Asterisk without GUI (config files)</p>
-                </button>
+                </div>
+
+                <!-- Prerequisites -->
+                <div class="bg-(--ui-bg-elevated)/50 border border-(--ui-border) rounded-xl p-6">
+                  <p class="text-[10px] uppercase tracking-widest font-bold text-(--ui-text-dimmed) mb-4">Prerequisites</p>
+                  <ul class="space-y-3">
+                    <li class="flex items-start gap-3 text-sm text-(--ui-text)">
+                      <UIcon name="i-lucide-check-circle-2" class="size-5 text-(--ui-primary) shrink-0 mt-0.5" />
+                      <span>{{ form.pbxType === 'freepbx' ? 'FreePBX' : 'Asterisk' }} installed and running</span>
+                    </li>
+                    <li class="flex items-start gap-3 text-sm text-(--ui-text)">
+                      <UIcon name="i-lucide-check-circle-2" class="size-5 text-(--ui-primary) shrink-0 mt-0.5" />
+                      <span>{{ form.pbxType === 'freepbx' ? 'Web access to admin panel' : 'Config file access (/etc/asterisk/)' }}</span>
+                    </li>
+                    <li class="flex items-start gap-3 text-sm text-(--ui-text)">
+                      <UIcon name="i-lucide-check-circle-2" class="size-5 text-(--ui-primary) shrink-0 mt-0.5" />
+                      <span>SSH / console access available</span>
+                    </li>
+                  </ul>
+                </div>
               </div>
             </div>
 
-            <!-- What you'll need -->
-            <div class="text-left mx-auto max-w-md space-y-2">
-              <p class="text-xs font-semibold uppercase tracking-wider text-(--ui-text-muted)">Before you start, make sure you have:</p>
-              <div class="space-y-1.5">
-                <div class="flex items-start gap-2 text-sm text-(--ui-text)">
-                  <UIcon name="i-lucide-check" class="size-4 text-green-500 shrink-0 mt-0.5" />
-                  <span>{{ form.pbxType === 'freepbx' ? 'FreePBX' : 'Asterisk' }} installed and running</span>
-                </div>
-                <div v-if="form.pbxType === 'freepbx'" class="flex items-start gap-2 text-sm text-(--ui-text)">
-                  <UIcon name="i-lucide-check" class="size-4 text-green-500 shrink-0 mt-0.5" />
-                  <span>Web access to your FreePBX admin panel</span>
-                </div>
-                <div class="flex items-start gap-2 text-sm text-(--ui-text)">
-                  <UIcon name="i-lucide-check" class="size-4 text-green-500 shrink-0 mt-0.5" />
-                  <span>SSH / console access to the {{ form.pbxType === 'freepbx' ? 'FreePBX' : 'Asterisk' }} server</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="flex justify-center">
-              <UButton
-                label="Get Started"
-                icon="i-lucide-arrow-right"
-                trailing
-                color="primary"
-                size="lg"
-                @click="step = 1"
-              />
-            </div>
-
-            <!-- Skip the manual setup -->
-            <div class="space-y-2 pt-2">
-              <p class="text-xs font-semibold uppercase tracking-wider text-(--ui-text-dimmed) text-center">Or skip the manual setup</p>
-              <div class="flex flex-col sm:flex-row gap-2">
+            <!-- Pro tiers + License — bottom section -->
+            <div class="border-t border-(--ui-border) mt-8 pt-6">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                 <component
                   :is="isTierUnlocked(tier.id) ? 'div' : 'a'"
                   v-for="tier in PRO_TIERS"
                   :key="tier.id"
                   v-bind="isTierUnlocked(tier.id) ? {} : { href: SPONSOR_URL, target: '_blank' }"
-                  class="flex-1 flex items-center gap-3 p-3 rounded-lg border transition-colors"
+                  class="group flex items-center p-4 rounded-xl border transition-colors"
                   :class="isTierUnlocked(tier.id)
                     ? 'border-green-500/30 bg-green-500/5'
-                    : ['border-dashed', tier.borderClass, tier.bgClass]"
+                    : 'border-(--ui-border) hover:bg-(--ui-bg-elevated)/50'"
                 >
-                  <UIcon :name="tier.icon" class="size-4 shrink-0" :class="`text-${tier.color}-500`" />
+                  <div class="w-10 h-10 flex items-center justify-center rounded-lg mr-4 shrink-0"
+                    :class="tier.id === 'pro-pack' ? 'bg-amber-500/10' : 'bg-purple-500/10'"
+                  >
+                    <UIcon :name="tier.icon" class="size-5" :class="tier.id === 'pro-pack' ? 'text-amber-400' : 'text-purple-400'" />
+                  </div>
                   <div class="flex-1 min-w-0">
-                    <span class="text-sm font-semibold text-(--ui-text-highlighted)">{{ tier.label }}</span>
+                    <div class="flex items-center justify-between mb-0.5">
+                      <p class="text-sm font-bold text-(--ui-text-highlighted) truncate">{{ tier.label }}</p>
+                      <span class="text-xs font-mono font-bold ml-2" :class="tier.id === 'pro-pack' ? 'text-amber-400' : 'text-purple-400'">
+                        {{ isTierUnlocked(tier.id) ? 'Unlocked' : tier.price }}
+                      </span>
+                    </div>
                     <p class="text-xs text-(--ui-text-muted) truncate">{{ tier.description }}</p>
                   </div>
                   <UButton
@@ -273,51 +304,42 @@
                     color="success"
                     variant="soft"
                     size="xs"
+                    class="ml-3"
                     @click.prevent="showAutoConfig = true"
                   />
-                  <UBadge
-                    v-else
-                    :label="isTierUnlocked(tier.id) ? 'Unlocked' : tier.price"
-                    :color="isTierUnlocked(tier.id) ? 'success' : tier.color"
-                    variant="subtle"
-                    size="md"
-                  />
+                  <UIcon v-else name="i-lucide-chevron-right" class="size-5 text-(--ui-text-dimmed) ml-3 group-hover:translate-x-1 transition-transform" />
                 </component>
               </div>
-            </div>
 
-            <!-- License key activation (only show when not already active) -->
-            <div v-if="!proActive" class="space-y-2 pt-2">
-              <p class="text-xs font-semibold uppercase tracking-wider text-(--ui-text-dimmed) text-center">Already have a license key?</p>
-              <div class="flex gap-2 max-w-md mx-auto">
-                <UInput
-                  v-model="licenseKey"
-                  placeholder="ARILINK-..."
-                  icon="i-lucide-key-round"
-                  class="flex-1"
-                  :color="licenseError ? 'error' : undefined"
-                />
-                <UButton
-                  label="Activate"
-                  icon="i-lucide-shield-check"
-                  color="primary"
-                  variant="soft"
-                  :loading="licenseActivating"
-                  :disabled="!licenseKey.trim()"
-                  @click="activateLicense"
-                />
+              <!-- License key -->
+              <div v-if="!proActive" class="flex flex-col md:flex-row items-center justify-center gap-4">
+                <span class="text-xs text-(--ui-text-muted) font-medium">Already have a license key?</span>
+                <div class="flex gap-2 w-full md:w-auto md:min-w-[400px]">
+                  <UInput
+                    v-model="licenseKey"
+                    placeholder="ARILINK-XXXX-XXXX-XXXX"
+                    size="sm"
+                    class="flex-1 font-mono"
+                    :color="licenseError ? 'error' : undefined"
+                  />
+                  <UButton
+                    label="Activate License"
+                    color="neutral"
+                    variant="outline"
+                    size="sm"
+                    :loading="licenseActivating"
+                    :disabled="!licenseKey.trim()"
+                    @click="activateLicense"
+                  />
+                </div>
               </div>
-              <p v-if="licenseError" class="text-xs text-(--ui-error) text-center">{{ licenseError }}</p>
+              <p v-if="licenseError" class="text-xs text-(--ui-error) text-center mt-2">{{ licenseError }}</p>
             </div>
-
-            <p class="text-xs text-(--ui-text-dimmed) text-center">
-              Check out <a :href="VORTIDECK_URL" target="_blank" class="underline hover:text-(--ui-text-muted)">VortiDeck.com</a>
-            </p>
           </template>
         </div>
 
         <!-- ═══ Step 1: Firewall ═══ -->
-        <div v-if="step === 1" class="space-y-6">
+        <div v-else-if="step === 1" key="1" class="space-y-6">
           <section class="space-y-4">
             <div class="flex items-center gap-2 pb-2 border-b border-(--ui-border)">
               <UIcon name="i-lucide-shield" class="size-4 text-(--ui-primary)" />
@@ -434,7 +456,7 @@ iptables -A INPUT -s YOUR_SERVER_IP -p udp --dport 10000:20000 -j ACCEPT</code><
         </div>
 
         <!-- ═══ Step 2: PBX Connection ═══ -->
-        <div v-if="step === 2" class="space-y-6">
+        <div v-else-if="step === 2" key="2" class="space-y-6">
           <section class="space-y-4">
             <div class="flex items-center gap-2 pb-2 border-b border-(--ui-border)">
               <UIcon name="i-lucide-server" class="size-4 text-(--ui-primary)" />
@@ -612,7 +634,7 @@ asterisk -rx "module reload res_http_websocket.so"</code></pre>
         </div>
 
         <!-- ═══ Step 3: Dialplan & Network ═══ -->
-        <div v-if="step === 3" class="space-y-6">
+        <div v-else-if="step === 3" key="3" class="space-y-6">
           <section class="space-y-4">
             <div class="flex items-center gap-2 pb-2 border-b border-(--ui-border)">
               <UIcon name="i-lucide-route" class="size-4 text-(--ui-primary)" />
@@ -695,7 +717,7 @@ exten => _X.,1,NoOp(AriLink — Incoming: $&#123;CALLERID(num)&#125; to $&#123;E
         </div>
 
         <!-- ═══ Step 4: Transcription Service ═══ -->
-        <div v-if="step === 4" class="space-y-6">
+        <div v-else-if="step === 4" key="4" class="space-y-6">
           <section class="space-y-4">
             <div class="flex items-center gap-2 pb-2 border-b border-(--ui-border)">
               <UIcon name="i-lucide-mic" class="size-4 text-(--ui-primary)" />
@@ -748,9 +770,13 @@ exten => _X.,1,NoOp(AriLink — Incoming: $&#123;CALLERID(num)&#125; to $&#123;E
             <!-- Google fields -->
             <template v-if="form.transcriptionType === 'google'">
               <UFormField>
-                <template #label><span class="inline-flex items-center gap-x-2">Google Credentials Path <UTooltip :delay-duration="0" text="Path to service account JSON file on server"><UIcon name="i-lucide-info" class="size-3.5 text-(--ui-text-dimmed) cursor-help" /></UTooltip></span></template>
-                <UInput v-model="form.GOOGLE_APPLICATION_CREDENTIALS" placeholder="/path/to/credentials.json" icon="i-lucide-file-key" />
+                <template #label><span class="inline-flex items-center gap-x-2">Service Account JSON <UTooltip :delay-duration="0" text="Paste the contents of your Google Cloud service account JSON key file"><UIcon name="i-lucide-info" class="size-3.5 text-(--ui-text-dimmed) cursor-help" /></UTooltip></span></template>
+                <UTextarea v-model="googleJsonSetup" placeholder='Paste your Google service account JSON here...' :rows="4" class="font-mono text-xs" />
               </UFormField>
+              <div v-if="googleSetupSummary" class="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-500/5 border border-green-500/20">
+                <UIcon name="i-lucide-check-circle" class="size-4 text-green-500" />
+                <span class="text-xs text-(--ui-text-muted)">{{ googleSetupSummary.projectId }} ({{ googleSetupSummary.clientEmail }})</span>
+              </div>
               <div class="flex items-center gap-3">
                 <UButton
                   label="Verify Credentials"
@@ -758,12 +784,12 @@ exten => _X.,1,NoOp(AriLink — Incoming: $&#123;CALLERID(num)&#125; to $&#123;E
                   color="primary"
                   variant="soft"
                   :loading="transcriptionTesting"
-                  :disabled="!form.GOOGLE_APPLICATION_CREDENTIALS"
+                  :disabled="!googleJsonSetup.trim()"
                   @click="testTranscription"
                 />
                 <UBadge v-if="transcriptionResult" :color="transcriptionResult.success ? 'success' : 'error'" variant="subtle">
                   <UIcon :name="transcriptionResult.success ? 'i-lucide-check' : 'i-lucide-x'" class="size-3 mr-1" />
-                  {{ transcriptionResult.success ? 'Credentials found' : transcriptionResult.error }}
+                  {{ transcriptionResult.success ? 'Credentials valid' : transcriptionResult.error }}
                 </UBadge>
               </div>
             </template>
@@ -788,7 +814,7 @@ exten => _X.,1,NoOp(AriLink — Incoming: $&#123;CALLERID(num)&#125; to $&#123;E
         </div>
 
         <!-- ═══ Step 5: Extensions & Routing ═══ -->
-        <div v-if="step === 5" class="space-y-6">
+        <div v-else-if="step === 5" key="5" class="space-y-6">
           <section class="space-y-4">
             <div class="flex items-center gap-2 pb-2 border-b border-(--ui-border)">
               <UIcon name="i-lucide-phone" class="size-4 text-(--ui-primary)" />
@@ -885,7 +911,7 @@ exten => _X.,1,NoOp(AriLink — Incoming: $&#123;CALLERID(num)&#125; to $&#123;E
         </div>
 
         <!-- ═══ Step 6: Done ═══ -->
-        <div v-if="step === 6" class="space-y-6">
+        <div v-else-if="step === 6" key="6" class="space-y-6">
           <section class="space-y-4">
             <div class="flex items-center gap-2 pb-2 border-b border-(--ui-border)">
               <UIcon name="i-lucide-check-circle" class="size-4 text-green-500" />
@@ -954,7 +980,15 @@ exten => _X.,1,NoOp(AriLink — Incoming: $&#123;CALLERID(num)&#125; to $&#123;E
             />
           </div>
         </div>
+        </Transition>
       </UCard>
+
+      <!-- Footer -->
+      <footer v-if="step === 0 && !showAutoConfig" class="mt-8 text-center">
+        <p class="text-(--ui-text-dimmed) text-xs">
+          Check out <a :href="VORTIDECK_URL" target="_blank" class="text-(--ui-text-muted) hover:text-(--ui-primary) underline transition-colors">VortiDeck.com</a>
+        </p>
+      </footer>
     </div>
   </div>
 </template>
@@ -1129,7 +1163,7 @@ const form = reactive({
   EXTERNAL_HOST: "",
   transcriptionType: "parakeet" as "parakeet" | "google" | "whisper" | "skip",
   TRANSCRIPTION_SERVICES: "",
-  GOOGLE_APPLICATION_CREDENTIALS: "",
+  GOOGLE_CREDENTIALS_JSON: "",
   DEFAULT_ASSISTANT: "",
 });
 
@@ -1163,6 +1197,42 @@ async function testAri() {
   }
 }
 
+// --- Google credentials (paste JSON in setup wizard) ---
+const googleJsonSetup = ref("");
+
+const googleSetupSummary = computed(() => {
+  const raw = googleJsonSetup.value.trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed.project_id) return null;
+    return { projectId: parsed.project_id, clientEmail: parsed.client_email || "" };
+  } catch {
+    return null;
+  }
+});
+
+// Auto-encode to base64 when valid JSON is pasted
+watch(googleJsonSetup, (raw) => {
+  const trimmed = raw.trim();
+  if (!trimmed) { form.GOOGLE_CREDENTIALS_JSON = ""; return; }
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed.type && parsed.project_id) {
+      form.GOOGLE_CREDENTIALS_JSON = btoa(trimmed);
+    }
+  } catch {
+    // Not valid JSON yet — user is still typing/pasting
+  }
+});
+
+// Decode existing base64 on load
+watch(() => form.GOOGLE_CREDENTIALS_JSON, (b64) => {
+  if (b64 && !googleJsonSetup.value.trim()) {
+    try { googleJsonSetup.value = atob(b64); } catch {}
+  }
+}, { immediate: true });
+
 // --- Transcription Test ---
 const transcriptionTesting = ref(false);
 const transcriptionResult = ref<{ success: boolean; error?: string } | null>(null);
@@ -1173,6 +1243,10 @@ async function testTranscription() {
   try {
     const body: any = { type: form.transcriptionType };
     if (form.transcriptionType === "google") {
+      // Save credentials first so the server can materialize them for the test
+      if (form.GOOGLE_CREDENTIALS_JSON) {
+        await $fetch("/api/env", { method: "PUT", body: { vars: { GOOGLE_CREDENTIALS_JSON: form.GOOGLE_CREDENTIALS_JSON } } });
+      }
       body.url = "";
     } else {
       body.url = form.TRANSCRIPTION_SERVICES;
@@ -1263,7 +1337,7 @@ onMounted(async () => {
     if (env.SSH_PORT) autoConfig.sshPort = env.SSH_PORT;
     if (env.SSH_USER) autoConfig.sshUser = env.SSH_USER;
     if (env.DEFAULT_ASSISTANT) form.DEFAULT_ASSISTANT = env.DEFAULT_ASSISTANT;
-    if (env.GOOGLE_APPLICATION_CREDENTIALS) form.GOOGLE_APPLICATION_CREDENTIALS = env.GOOGLE_APPLICATION_CREDENTIALS;
+    if (env.GOOGLE_CREDENTIALS_JSON) form.GOOGLE_CREDENTIALS_JSON = env.GOOGLE_CREDENTIALS_JSON;
     if (env.TRANSCRIPTION_SERVICES) {
       const svc = env.TRANSCRIPTION_SERVICES;
       if (svc === "google") {
@@ -1306,7 +1380,7 @@ const summaryItems = computed(() => [
   {
     label: "Transcription Service",
     done: form.transcriptionType !== "skip" && (
-      !!form.TRANSCRIPTION_SERVICES || !!form.GOOGLE_APPLICATION_CREDENTIALS
+      !!form.TRANSCRIPTION_SERVICES || !!form.GOOGLE_CREDENTIALS_JSON
     ),
     detail: form.transcriptionType === "skip"
       ? "Skipped"
@@ -1352,8 +1426,8 @@ async function finishSetup() {
 
     if (form.transcriptionType === "google") {
       envVars.TRANSCRIPTION_SERVICES = "google";
-      if (form.GOOGLE_APPLICATION_CREDENTIALS) {
-        envVars.GOOGLE_APPLICATION_CREDENTIALS = form.GOOGLE_APPLICATION_CREDENTIALS;
+      if (form.GOOGLE_CREDENTIALS_JSON) {
+        envVars.GOOGLE_CREDENTIALS_JSON = form.GOOGLE_CREDENTIALS_JSON;
       }
     } else if (form.transcriptionType !== "skip" && form.TRANSCRIPTION_SERVICES) {
       envVars.TRANSCRIPTION_SERVICES = form.TRANSCRIPTION_SERVICES;
@@ -1370,3 +1444,24 @@ async function finishSetup() {
   }
 }
 </script>
+
+<style scoped>
+.step-enter-active,
+.step-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.step-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.step-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+.setup-container {
+  transition: max-width 0.3s ease;
+}
+</style>

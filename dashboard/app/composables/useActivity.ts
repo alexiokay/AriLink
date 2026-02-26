@@ -22,6 +22,7 @@ export function useActivity() {
       return detail ? `${label} → ${detail}` : label!;
     }
     if (entry.type === "transcription") return `"${entry.text}"`;
+    if (entry.type === "spoken") return `Bot: "${entry.text}"`;
     if (entry.type === "dtmf") return `DTMF: ${entry.text}`;
     return entry.text;
   }
@@ -29,6 +30,7 @@ export function useActivity() {
   function activityIcon(type: string): string {
     if (type === "state") return "i-lucide-arrow-right";
     if (type === "transcription") return "i-lucide-message-square";
+    if (type === "spoken") return "i-lucide-volume-2";
     if (type === "dtmf") return "i-lucide-hash";
     return "i-lucide-circle";
   }
@@ -36,6 +38,7 @@ export function useActivity() {
   function activityColor(type: string): string {
     if (type === "state") return "text-(--ui-text-dimmed)";
     if (type === "transcription") return "text-(--ui-primary)";
+    if (type === "spoken") return "text-(--ui-success)";
     if (type === "dtmf") return "text-(--ui-warning)";
     return "text-(--ui-text-dimmed)";
   }

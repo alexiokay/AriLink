@@ -11,12 +11,31 @@ import wave
 import io
 import signal
 import sys
+from http import HTTPStatus
 from pathlib import Path
 from typing import Optional
 
 import websockets
 from faster_whisper import WhisperModel
 import numpy as np
+
+# Version-compatible HTTP health handler for websockets 12+ / 13+
+try:
+    from websockets.http11 import Response as _WsResponse
+    from websockets.datastructures import Headers as _WsHeaders
+    def _create_health_handler(service):
+        def handler(connection, request):
+            if request.path == "/health":
+                body = service._health_json().encode()
+                return _WsResponse(200, "OK", _WsHeaders([("Content-Type", "application/json")]), body)
+        return handler
+except ImportError:
+    def _create_health_handler(service):
+        async def handler(path, request_headers):
+            if path == "/health":
+                body = service._health_json().encode()
+                return HTTPStatus.OK, [("Content-Type", "application/json")], body
+        return handler
 
 # Configure logging
 logging.basicConfig(
@@ -40,6 +59,9 @@ class WhisperTranscriptionService:
         self.device = device
         self.compute_type = compute_type
         self.model: Optional[WhisperModel] = None
+
+        # Health handler for HTTP /health endpoint
+        self._process_request = _create_health_handler(self)
 
         # Audio buffer settings
         self.sample_rate = 16000  # Whisper expects 16kHz
@@ -185,13 +207,27 @@ class WhisperTranscriptionService:
         """Synchronous wrapper for transcription (for thread pool)"""
         return asyncio.run(self.transcribe_audio(audio_data, language))
 
+    def _health_json(self):
+        """JSON health response identifying this service"""
+        return json.dumps({
+            "service": "whisper",
+            "model": self.model_size,
+            "device": self.device,
+            "compute_type": self.compute_type,
+            "status": "ready" if self.model is not None else "loading",
+        })
+
     async def start(self):
         """Start the WebSocket server"""
         logger.info(f"Starting Whisper Transcription Service on {self.host}:{self.port}")
         self.load_model()
 
-        async with websockets.serve(self.handle_client, self.host, self.port):
+        async with websockets.serve(
+            self.handle_client, self.host, self.port,
+            process_request=self._process_request,
+        ):
             logger.info(f"✅ Service ready! Listening on ws://{self.host}:{self.port}")
+            logger.info(f"   GET /health returns service identity")
             await asyncio.Future()  # Run forever
 
 def main():

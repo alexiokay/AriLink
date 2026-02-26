@@ -32,7 +32,12 @@
     "ws": "^8.13.0"
   },
   "overrides": {
-    "fast-xml-parser": ">=5.3.6"
+    "fast-xml-parser": ">=5.3.6",
+    "tough-cookie": ">=4.1.3",
+    "cookiejar": ">=2.1.4",
+    "form-data": ">=2.5.4",
+    "qs": ">=6.14.1",
+    "minimatch": ">=10.2.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

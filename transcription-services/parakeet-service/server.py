@@ -13,12 +13,31 @@ import logging
 import signal
 import sys
 import os
+from http import HTTPStatus
 from pathlib import Path
 import torch
 import websockets
 import nemo.collections.asr as nemo_asr
 import numpy as np
 import soundfile as sf
+
+# Version-compatible HTTP health handler for websockets 12+ / 13+
+try:
+    from websockets.http11 import Response as _WsResponse
+    from websockets.datastructures import Headers as _WsHeaders
+    def _create_health_handler(service):
+        def handler(connection, request):
+            if request.path == "/health":
+                body = service._health_json().encode()
+                return _WsResponse(200, "OK", _WsHeaders([("Content-Type", "application/json")]), body)
+        return handler
+except ImportError:
+    def _create_health_handler(service):
+        async def handler(path, request_headers):
+            if path == "/health":
+                body = service._health_json().encode()
+                return HTTPStatus.OK, [("Content-Type", "application/json")], body
+        return handler
 
 # CUDA graphs enabled for maximum performance
 # os.environ["NEMO_DISABLE_CUDA_GRAPHS"] = "1"  # Uncomment if CUDA errors occur
@@ -46,6 +65,15 @@ class ParakeetTranscriptionService:
         self.model = None
         self.vad_model = None
         self.use_vad_chunking = use_vad_chunking
+
+        # VAD threshold: probability above which audio is considered speech.
+        # 0.3 = very sensitive (catches faint speech but also noise → ghost words)
+        # 0.5 = balanced (standard Silero recommendation)
+        # 0.7 = conservative (only clear speech, less false positives)
+        self.vad_threshold = float(os.environ.get("VAD_THRESHOLD", "0.5"))
+
+        # Health handler for HTTP /health endpoint
+        self._process_request = _create_health_handler(self)
 
         # Audio buffer settings
         self.sample_rate = 16000  # Parakeet expects 16kHz
@@ -98,6 +126,21 @@ class ParakeetTranscriptionService:
         logger.info(f"   Speed: 2000x+ RTFx (Real-Time Factor)")
         logger.info(f"   Languages: 25 European languages (English, Polish, German, French, etc.)")
         logger.info(f"   Features: ASR (transcription) + AST (translation)")
+        logger.info(f"   VAD threshold: {self.vad_threshold} (env VAD_THRESHOLD)")
+
+        # Warmup inference — triggers PyTorch JIT/CUDA compilation so first real call is fast
+        logger.info("Running warmup inference...")
+        try:
+            warmup_audio = torch.zeros(self.sample_rate)  # 1 second of silence
+            if self.model is not None:
+                self.model.transcribe(audio=[warmup_audio], batch_size=1, timestamps=False, verbose=False)
+            if self.vad_model is not None:
+                warmup_vad = torch.zeros(512).float().cpu()
+                self.vad_model(warmup_vad, self.sample_rate)
+                self.vad_model.reset_states()
+            logger.info("✅ Warmup complete — first call will be fast")
+        except Exception as e:
+            logger.warning(f"Warmup inference failed (non-fatal): {e}")
 
     def detect_speech_in_chunk(self, audio_array: np.ndarray) -> float:
         """
@@ -240,6 +283,10 @@ class ParakeetTranscriptionService:
         client_id = id(websocket)
         logger.info(f"🔗 Client {client_id} connected")
 
+        # Reset Silero VAD LSTM state for clean speech detection on this call
+        if self.vad_model is not None:
+            self.vad_model.reset_states()
+
         audio_buffer = bytearray()
 
         # Initialize variables for both modes
@@ -250,7 +297,7 @@ class ParakeetTranscriptionService:
             # VAD-based chunking with smart timeout
             pre_roll_buffer = bytearray()
             pre_roll_size = int(0.2 * self.sample_rate * 2)  # 200ms pre-roll
-            min_chunk_size = int(0.3 * self.sample_rate * 2)  # 300ms minimum (reduced for faster response)
+            min_chunk_size = int(0.2 * self.sample_rate * 2)  # 200ms minimum for fast response
             max_chunk_size = int(10.0 * self.sample_rate * 2)  # 10 seconds maximum
             silence_frames = 0
             silence_threshold = 2  # Reduced from 3 to 2 for faster response
@@ -327,8 +374,8 @@ class ParakeetTranscriptionService:
                         audio_array = np.frombuffer(message, dtype=np.int16).astype(np.float32) / 32768.0
                         speech_prob = self.detect_speech_in_chunk(audio_array)
 
-                        # Lower threshold for telephony audio (0.3 instead of 0.5)
-                        has_speech = speech_prob > 0.3
+                        # Configurable VAD threshold (env VAD_THRESHOLD, default 0.5)
+                        has_speech = speech_prob > self.vad_threshold
 
                         if has_speech:
                             # Speech detected
@@ -337,6 +384,11 @@ class ParakeetTranscriptionService:
                                 logger.info(f"[Client {client_id}] 🎤 Speech started (prob={speech_prob:.2f})")
                                 audio_buffer.extend(pre_roll_buffer)
                                 is_speaking = True
+                                # Notify controller immediately for barge-in
+                                await websocket.send(json.dumps({
+                                    "type": "speech_started",
+                                    "prob": round(speech_prob, 2)
+                                }))
 
                             # Add current audio to buffer
                             audio_buffer.extend(message)
@@ -439,13 +491,26 @@ class ParakeetTranscriptionService:
         finally:
             logger.info(f"Client {client_id} session ended")
 
+    def _health_json(self):
+        """JSON health response identifying this service"""
+        return json.dumps({
+            "service": "parakeet",
+            "model": self.model_name,
+            "device": self.device,
+            "status": "ready" if self.model is not None else "loading",
+        })
+
     async def start(self):
         """Start the WebSocket server"""
         logger.info(f"🚀 Starting Parakeet Transcription Service on {self.host}:{self.port}")
         self.load_model()
 
-        async with websockets.serve(self.handle_client, self.host, self.port):
+        async with websockets.serve(
+            self.handle_client, self.host, self.port,
+            process_request=self._process_request,
+        ):
             logger.info(f"✅ Service ready! Listening on ws://{self.host}:{self.port}")
+            logger.info(f"   GET /health returns service identity")
             logger.info(f"💡 Ready to handle 18+ concurrent calls with single model instance")
             await asyncio.Future()  # Run forever
 

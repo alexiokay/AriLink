@@ -27,7 +27,7 @@ let parakeetProc = null;
 
   // Forward any extra args (e.g. --port 3011)
   const extraArgs = process.argv.slice(2);
-  const nuxtArgs = ["nuxt", "dev", "--port", "3011", ...extraArgs];
+  const nuxtArgs = ["nuxt", "dev", "--port", "3011", "--dotenv", "../.env", ...extraArgs];
 
   const child = spawn("npx", nuxtArgs, {
     cwd: path.resolve(__dirname, "../dashboard"),

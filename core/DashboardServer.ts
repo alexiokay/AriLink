@@ -1,6 +1,8 @@
 const {
   sessionManager: dashSessionManager,
 } = require("./CallSession");
+const fs = require("fs");
+const path = require("path");
 
 class DashboardServer {
   private io: any;
@@ -63,7 +65,11 @@ class DashboardServer {
 
   private initServiceState() {
     const useRust = process.env.USE_RUST_RTP === "true";
+    const ttsProvider = (process.env.TTS_PROVIDER || "kokoro").toLowerCase();
     const ttsUrl = process.env.TTS_SERVICE;
+    const ttsConfigured = ttsProvider === "elevenlabs"
+      ? !!process.env.ELEVENLABS_API_KEY
+      : !!ttsUrl;
     this.serviceState = {
       asterisk: {
         label: "Asterisk",
@@ -81,9 +87,11 @@ class DashboardServer {
         detail: process.env.TRANSCRIPTION_SERVICES || "not configured",
       },
       tts: {
-        label: "TTS (Kokoro)",
-        status: ttsUrl ? "connecting" : "disabled",
-        detail: ttsUrl || "TTS_SERVICE not set",
+        label: ttsProvider === "elevenlabs" ? "TTS (ElevenLabs)" : "TTS (Kokoro)",
+        status: ttsConfigured ? "connecting" : "disabled",
+        detail: ttsConfigured
+          ? (ttsProvider === "elevenlabs" ? "ElevenLabs API" : ttsUrl!)
+          : (ttsProvider === "elevenlabs" ? "ELEVENLABS_API_KEY not set" : "TTS_SERVICE not set"),
       },
     };
   }
@@ -127,8 +135,11 @@ class DashboardServer {
         if (data?.assistant) {
           process.env.DEFAULT_ASSISTANT = data.assistant;
           this.config.assistant = data.assistant;
-          console.log(`[Dashboard] Assistant changed to: ${data.assistant}`);
+          console.log(`[Dashboard] Assistant changed to: ${data.assistant} (env now: ${process.env.DEFAULT_ASSISTANT})`);
           this.io.emit("dashboard:config", this.config);
+
+          // Persist to .env so it survives restarts
+          this.persistEnvVar("DEFAULT_ASSISTANT", data.assistant);
         }
       });
 
@@ -167,6 +178,20 @@ class DashboardServer {
         if (this.actionHandler) {
           console.log("[Dashboard] Restart Parakeet requested");
           this.actionHandler("restartParakeet", {});
+        }
+      });
+
+      socket.on("dashboard:reconnectTts", () => {
+        if (this.actionHandler) {
+          console.log("[Dashboard] Reconnect TTS requested");
+          this.actionHandler("reconnectTts", {});
+        }
+      });
+
+      socket.on("dashboard:restartContainer", (data: { service: string }) => {
+        if (data?.service && this.actionHandler) {
+          console.log(`[Dashboard] Restart container requested: ${data.service}`);
+          this.actionHandler("restartContainer", data);
         }
       });
 
@@ -223,9 +248,10 @@ class DashboardServer {
         });
 
         this.campaignDialer.on("campaignComplete", () => {
-          this.lastCampaignStatus = this.campaignDialer.getStatus();
-          this.io.emit("dashboard:campaignStatus", this.lastCampaignStatus);
+          const dialer = this.campaignDialer;
           this.campaignDialer = null; // Allow new campaign
+          this.lastCampaignStatus = dialer?.getStatus() || null;
+          this.io.emit("dashboard:campaignStatus", this.lastCampaignStatus);
         });
 
         this.campaignDialer.start();
@@ -302,7 +328,7 @@ class DashboardServer {
 
         // Clean up existing session for this tab
         if (terminalSessions[tabId]) {
-          try { terminalSessions[tabId].dispose(); } catch {}
+          try { terminalSessions[tabId].dispose(); } catch { }
           delete terminalSessions[tabId];
         }
 
@@ -358,7 +384,7 @@ class DashboardServer {
         } else if (!tabId) {
           for (const [key, session] of Object.entries(terminalSessions)) {
             console.log(`[Dashboard] Stopping terminal ${key} for ${socket.id}`);
-            try { (session as any).dispose(); } catch {}
+            try { (session as any).dispose(); } catch { }
             delete terminalSessions[key];
           }
         }
@@ -447,7 +473,7 @@ class DashboardServer {
         console.log(`[Dashboard] Client disconnected: ${socket.id}`);
         this.openclawSockets.delete(socket.id);
         for (const [key, session] of Object.entries(terminalSessions)) {
-          try { (session as any).dispose(); } catch {}
+          try { (session as any).dispose(); } catch { }
           delete terminalSessions[key];
         }
       });
@@ -475,6 +501,42 @@ class DashboardServer {
     return calls;
   }
 
+  /** Keys allowed to be persisted via Socket.IO events */
+  private static readonly PERSIST_ALLOWED_KEYS = new Set(["DEFAULT_ASSISTANT"]);
+
+  /** Write a single key=value to the project .env file (update existing or append) */
+  private persistEnvVar(key: string, value: string) {
+    if (!DashboardServer.PERSIST_ALLOWED_KEYS.has(key)) {
+      console.warn(`[Dashboard] Rejected attempt to persist disallowed key: ${key}`);
+      return;
+    }
+    try {
+      // Use __dirname (core/) to resolve to project root, not process.cwd()
+      // which is "dashboard/" when running via `npm run dev`
+      const envPath = path.resolve(__dirname, "..", ".env");
+      let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf-8") : "";
+      const lines = content.split("\n");
+      let found = false;
+
+      for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eqIdx = trimmed.indexOf("=");
+        if (eqIdx < 0) continue;
+        if (trimmed.slice(0, eqIdx).trim() === key) {
+          lines[i] = `${key}=${value}`;
+          found = true;
+          break;
+        }
+      }
+      if (!found) lines.push(`${key}=${value}`);
+
+      fs.writeFileSync(envPath, lines.join("\n"), "utf-8");
+    } catch (err: any) {
+      console.error(`[Dashboard] Failed to persist ${key} to .env: ${err.message}`);
+    }
+  }
+
   // --- Public methods called by AriControllerServer ---
 
   /** Update a service's live status and broadcast to all dashboard clients */
@@ -487,6 +549,14 @@ class DashboardServer {
     }
     // Broadcast full service state to all clients
     this.io.emit("dashboard:services", this.serviceState);
+  }
+
+  /** Re-read TTS_PROVIDER env and update the service label (called before reconnect) */
+  refreshTtsLabel() {
+    const p = (process.env.TTS_PROVIDER || "kokoro").toLowerCase();
+    if (this.serviceState.tts) {
+      this.serviceState.tts.label = p === "elevenlabs" ? "TTS (ElevenLabs)" : "TTS (Kokoro)";
+    }
   }
 
   emitCallUpdate(call: any) {
@@ -522,6 +592,15 @@ class DashboardServer {
     }
   }
 
+  /** Broadcast what the assistant/TTS spoke to the caller */
+  emitSpoken(data: { sessionId: string; text: string }) {
+    const ts = Date.now();
+    this.io.emit("dashboard:spoken", { ...data, timestamp: ts });
+    if (this.callHistory) {
+      this.callHistory.saveEvent({ callId: data.sessionId, type: "spoken", text: data.text, timestamp: new Date(ts).toISOString() });
+    }
+  }
+
   // --- OpenClaw event emitters (called by AriControllerServer) ---
 
   /** Forward transcription to connected OpenClaw plugins */
@@ -550,4 +629,4 @@ class DashboardServer {
 }
 
 module.exports.DashboardServer = DashboardServer;
-export {};
+export { };

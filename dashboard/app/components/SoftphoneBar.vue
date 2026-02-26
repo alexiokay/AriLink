@@ -356,7 +356,7 @@
 
             <!-- In-call DTMF pad -->
             <div v-if="showInCallDtmf" class="mb-2.5">
-              <SoftphoneDialpad @press="sendDTMF($event)" />
+              <SoftphoneDialpad @press="onInCallDtmf($event)" />
             </div>
           </template>
 
@@ -394,6 +394,11 @@
 </template>
 
 <script setup lang="ts">
+import {
+  playDtmfTone, startRingback, stopRingback,
+  startRingtone, stopRingtone, stopAllTones,
+} from "~/composables/useSoftphoneTones";
+
 const {
   regState, regError, callState, callDirection, remoteNumber, callStartTime,
   isMuted, isOnHold, activeAccountIdx, config, micError,
@@ -568,6 +573,9 @@ function updateDuration() {
 }
 
 watch(callState, (state) => {
+  // Stop all tones first, then start the appropriate one
+  stopAllTones();
+
   if (state === "connected") {
     updateDuration();
     durationTimer = setInterval(updateDuration, 1000);
@@ -576,20 +584,35 @@ watch(callState, (state) => {
     liveDuration.value = "0:00";
   }
 
-  // Auto-expand when call comes in
-  if (state === "ringing-in") expanded.value = true;
+  // Ringback tone when dialing out
+  if (state === "ringing-out") startRingback();
+
+  // Ringtone when receiving a call
+  if (state === "ringing-in") {
+    startRingtone();
+    expanded.value = true;
+  }
 });
 
 onUnmounted(() => {
   if (durationTimer) clearInterval(durationTimer);
+  stopAllTones();
 });
 
 // ── Dialpad input ──
 
 function onDialpadPress(digit: string) {
+  playDtmfTone(digit);
   if (callState.value === "idle") {
     dialNumber.value += digit;
   }
+}
+
+// ── In-call DTMF with tone ──
+
+function onInCallDtmf(digit: string) {
+  playDtmfTone(digit);
+  sendDTMF(digit);
 }
 
 // ── Transfer ──

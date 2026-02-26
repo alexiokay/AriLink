@@ -16,6 +16,7 @@ class CallHistory {
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
     this.migrate();
+    this.cleanupOrphanedCalls();
   }
 
   private migrate() {
@@ -57,6 +58,18 @@ class CallHistory {
 
       CREATE INDEX IF NOT EXISTS idx_events_call_id ON events(call_id);
     `);
+  }
+
+  /** Mark any 'active' calls from a previous run as ended (crash/restart recovery) */
+  private cleanupOrphanedCalls() {
+    const now = new Date().toISOString();
+    const result = this.db.prepare(`
+      UPDATE calls SET end_time = ?, status = 'ended'
+      WHERE status = 'active' AND end_time IS NULL
+    `).run(now);
+    if (result.changes > 0) {
+      console.log(`[CallHistory] Cleaned up ${result.changes} orphaned active call(s) from previous run`);
+    }
   }
 
   saveCall(data: {

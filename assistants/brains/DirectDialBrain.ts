@@ -22,7 +22,7 @@ class DirectDialBrain implements IBrain {
   init(harness: IBrainHarness): void {
     this.harness = harness;
 
-    const contacts = (harness as any).getContacts?.() || null;
+    const contacts = harness.getContacts?.() || null;
     this.contactMatcher = new ContactMatcher(contacts);
 
     const maxRetries = (harness.config.behavior.maxNoMatches as number) || 12;

@@ -9,7 +9,7 @@ const openclawConfig: AssistantConfig = require("./config.json");
  * OpenClaw Assistant
  *
  * Bridges phone calls to an OpenClaw AI agent via Socket.IO.
- * The OpenClaw Channel Plugin (@arilink/openclaw-channel) connects
+ * The OpenClaw Channel Plugin (@openclaw/arilink) connects
  * to AriLink and receives transcription events from this assistant.
  *
  * Call flow:
@@ -80,7 +80,7 @@ class OpenClawAssistant extends BaseAssistant {
     // The OpenClaw plugin decides which ones to process
     this.emit("openclawTranscription", {
       sessionId: this.sessionId,
-      callId: this.sessionId,
+
       text: text.trim(),
       isFinal,
       callerNumber: this.callerId,
@@ -100,7 +100,7 @@ class OpenClawAssistant extends BaseAssistant {
     // Forward DTMF to OpenClaw as a special transcription
     this.emit("openclawTranscription", {
       sessionId: this.sessionId,
-      callId: this.sessionId,
+
       text: `[DTMF: ${digit}]`,
       isFinal: true,
       callerNumber: this.callerId,
@@ -144,7 +144,7 @@ class OpenClawAssistant extends BaseAssistant {
     // Notify OpenClaw
     this.emit("openclawCallEnded", {
       sessionId: this.sessionId,
-      callId: this.sessionId,
+
       reason: "hangup",
     });
 

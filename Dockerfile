@@ -36,9 +36,9 @@ FROM node:22-slim
 
 WORKDIR /app
 
-# Install runtime deps for native addons
+# Install runtime deps for native addons + Docker CLI for sibling container management
 RUN apt-get update && \
-    apt-get install -y python3 make g++ && \
+    apt-get install -y python3 make g++ docker.io && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy root node_modules (tsx, ari-client, better-sqlite3, ws, etc.)

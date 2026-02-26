@@ -225,6 +225,17 @@ fn handle_transcription_message(
                 });
             }
         }
+        Some("speech_started") => {
+            // VAD detected speech start — forward immediately for barge-in.
+            // Sent as a TranscriptionEvent with empty text so it flows through
+            // the existing broadcast channel without schema changes.
+            tracing::debug!("[{}] Speech started (VAD)", session_id);
+            let _ = tx.send(TranscriptionEvent {
+                session_id: session_id.to_string(),
+                text: String::new(),
+                is_final: false,
+            });
+        }
         Some("pong") => {
             tracing::debug!("[{}] Received pong from service", session_id);
         }

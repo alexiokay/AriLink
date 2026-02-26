@@ -1,13 +1,10 @@
 import { resolve } from "path";
-import { config } from "dotenv";
-
-// Load .env from project root (one level up from dashboard/)
-config({ path: resolve(__dirname, "../.env") });
 
 export default defineNuxtConfig({
   compatibilityDate: "2025-05-01",
   modules: ["@nuxt/ui", "@nuxt/content"],
   devtools: { enabled: true },
+  devServer: { host: "::" },
   ssr: false,
   css: ["~/assets/css/main.css"],
 

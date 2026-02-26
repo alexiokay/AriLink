@@ -1,0 +1,21 @@
+{
+  "name": "LLM Chat",
+  "description": "Conversational AI assistant powered by a local or cloud LLM. Caller speaks, LLM thinks, TTS responds.",
+  "mode": "incoming",
+  "brain": "llm-chat",
+  "language": "en-US",
+  "prompts": {
+    "welcome": "custom/welcome"
+  },
+  "behavior": {
+    "llmProvider": "ollama",
+    "llmModel": "llama3.2",
+    "llmApiKey": "",
+    "systemPrompt": "You are a helpful phone assistant. Keep responses short (1-2 sentences) and conversational. Do not use markdown, lists, or formatting — the response will be spoken aloud.",
+    "maxHistory": 20,
+    "temperature": 0.7,
+    "maxRetries": 3,
+    "timeoutSeconds": 30,
+    "silenceThresholdSeconds": 5
+  }
+}

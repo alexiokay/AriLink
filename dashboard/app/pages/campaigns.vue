@@ -540,7 +540,7 @@ or CSV:
                       :label="`${result}: ${count}`"
                       :color="resultColor(String(result))"
                       variant="subtle"
-                      size="xs"
+                      size="md"
                     />
                   </div>
                 </td>

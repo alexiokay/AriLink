@@ -35,6 +35,10 @@ interface SoftphoneConfig {
 let ua: UserAgent | null = null;
 let registerer: Registerer | null = null;
 let currentSession: Session | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempt = 0;
+const MAX_RECONNECT_ATTEMPTS = 20;
+const RECONNECT_BASE_DELAY = 2000; // 2s, doubles each attempt up to ~30s
 
 if (import.meta.hot) {
   ua = import.meta.hot.data.ua ?? null;
@@ -44,6 +48,7 @@ if (import.meta.hot) {
     data.ua = ua;
     data.registerer = registerer;
     data.currentSession = currentSession;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
   });
 }
 
@@ -265,6 +270,18 @@ export function useSoftphone() {
 
       await ua.start();
 
+      // Auto-reconnect on WebSocket disconnect
+      const transport = ua.transport as any;
+      if (transport) {
+        const origOnDisconnect = transport.onDisconnect;
+        transport.onDisconnect = (error?: Error) => {
+          console.warn("[Softphone] Transport disconnected", error?.message || "");
+          regState.value = "unregistered";
+          if (origOnDisconnect) origOnDisconnect.call(transport, error);
+          scheduleReconnect();
+        };
+      }
+
       registerer = new Registerer(ua);
 
       registerer.stateChange.addListener((state: RegistererState) => {
@@ -272,6 +289,7 @@ export function useSoftphone() {
           case RegistererState.Registered:
             regState.value = "registered";
             regError.value = "";
+            reconnectAttempt = 0; // Reset on successful registration
             break;
           case RegistererState.Unregistered:
             regState.value = "unregistered";
@@ -287,6 +305,7 @@ export function useSoftphone() {
       regState.value = "error";
       regError.value = err.message || "Registration failed";
       console.error("[Softphone] Registration error:", err);
+      scheduleReconnect();
     }
   }
 
@@ -472,6 +491,10 @@ export function useSoftphone() {
   // ── Dispose: unregister and stop ──
 
   async function dispose() {
+    // Cancel any pending reconnect
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    reconnectAttempt = 0;
+
     try {
       if (currentSession && currentSession.state !== SessionState.Terminated) {
         try { await currentSession.bye(); } catch {}
@@ -492,6 +515,30 @@ export function useSoftphone() {
     } catch (err) {
       console.error("[Softphone] Dispose error:", err);
     }
+  }
+
+  // ── Auto-reconnect with exponential backoff ──
+
+  function scheduleReconnect() {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
+      console.warn("[Softphone] Max reconnect attempts reached");
+      regError.value = "Connection lost — click refresh to retry";
+      return;
+    }
+
+    const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempt), 30000);
+    reconnectAttempt++;
+    console.log(`[Softphone] Reconnecting in ${delay}ms (attempt ${reconnectAttempt}/${MAX_RECONNECT_ATTEMPTS})`);
+
+    reconnectTimer = setTimeout(async () => {
+      reconnectTimer = null;
+      try {
+        await connectAccount(activeAccountIdx.value);
+      } catch (err) {
+        console.warn("[Softphone] Reconnect failed:", err);
+      }
+    }, delay);
   }
 
   // ── Auto-init when used in browser ──

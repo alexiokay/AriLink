@@ -3,17 +3,18 @@ FROM andrius/asterisk:23
 # Switch to root for config and entrypoint setup
 USER root
 
-# Copy custom configuration
-COPY config/ari.conf /etc/asterisk/ari.conf
-COPY config/http.conf /etc/asterisk/http.conf
-COPY config/extensions.conf /etc/asterisk/extensions.conf
-COPY config/pjsip.conf /etc/asterisk/pjsip.conf
-COPY config/modules.conf /etc/asterisk/modules.conf
-COPY config/rtp.conf /etc/asterisk/rtp.conf
+# Stage configs — /etc/asterisk is a Docker VOLUME in the base image,
+# so COPY to it gets hidden by persisted volume data on recreate.
+# Entrypoint copies from staging dir at runtime instead.
+COPY config/ /opt/arilink-config/
 
 # Copy entrypoint, make executable, strip any Windows CRLF
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh && sed -i 's/\r$//' /entrypoint.sh
+
+# Install ca-certificates for HTTPS downloads in entrypoint (sound files)
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Ensure asterisk owns its config
 RUN chown -R asterisk:asterisk /etc/asterisk/

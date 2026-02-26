@@ -22,10 +22,16 @@ services:
       - ASTERISK_LOGIN=${ASTERISK_LOGIN:-arilink}
       - ASTERISK_PASSWORD=${ASTERISK_PASSWORD:-arilink123}
       - STASIS_APP_NAME=${STASIS_APP_NAME:-stasis-app}
+      - EXTERNAL_IP=${EXTERNAL_IP:-}    # Host IP for WebRTC NAT traversal (e.g. 192.168.1.100)
     ports:
       - "5060:5060/udp"       # SIP signaling
-      - "8088:8088"           # ARI HTTP API
+      - "8088:8088"           # ARI HTTP + WebSocket (SIP.js)
+      - "5060:5060/tcp"       # SIP signaling (TCP)
       - "10000-10100:10000-10100/udp"  # RTP media (reduced range for demo)
+    volumes:
+      - ./docker/asterisk/sounds:/var/lib/asterisk/sounds    # Bind mount — visible on host + shared with arilink
+      - ./docker/asterisk/moh:/var/lib/asterisk/moh
+      - ./docker/asterisk/spool:/var/spool/asterisk
     networks:
       - arilink
     restart: unless-stopped
@@ -42,6 +48,7 @@ services:
     container_name: arilink-parakeet
     environment:
       - TRANSCRIPTION_DEVICE=cpu
+      - VAD_THRESHOLD=${VAD_THRESHOLD:-0.5}
     ports:
       - "5000:5000"
     volumes:
@@ -94,17 +101,25 @@ services:
       - AUTO_START_TRANSCRIPTION=false
       - SPEECH_LANG=${SPEECH_LANG:-en-US}
       - DEFAULT_ASSISTANT=${DEFAULT_ASSISTANT:-ivr-transfer}
-      - USE_RUST_RTP=false
+      - USE_RUST_RTP=${USE_RUST_RTP:-false}
       - RUST_SERVER_URL=http://rust-rtp:9900
+      - RTP_TTS_PORT=8001
       - WSS_PORT=${WSS_PORT:-3044}
       - PORT=3011
       - NITRO_PORT=3011
+      - SSH_HOST=                              # Empty = local filesystem (shared bind mounts with Asterisk)
+      - DOCKER_MANAGEMENT=true                  # Enable container management from dashboard
     ports:
       - "3011:3011"           # Dashboard UI + API
-      - "8000:8000/udp"       # RTP listener (receives audio from Asterisk)
+      # Note: port 8000/udp handled by rust-rtp when --profile rust-rtp is active
+      # For non-Rust mode, Asterisk reaches arilink:8000 via Docker network (no host mapping needed)
     volumes:
       - ./data:/app/data      # SQLite call history database
       - ./logs:/app/logs      # Log files
+      - ./docker/asterisk/sounds:/var/lib/asterisk/sounds    # Same bind mount as Asterisk
+      - ./docker/asterisk/moh:/var/lib/asterisk/moh
+      - ./docker/asterisk/spool:/var/spool/asterisk
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker socket for container management
     depends_on:
       asterisk:
         condition: service_healthy
@@ -120,8 +135,13 @@ services:
     container_name: arilink-rust-rtp
     environment:
       - RUST_LOG=info
+      - RTP_LISTEN_ADDR=0.0.0.0:8000
+      - RTP_TTS_ADDR=0.0.0.0:8001
+      - TRANSCRIPTION_SERVICES=ws://parakeet:5000
     ports:
-      - "9900:9900"
+      - "9900:9900"           # API (HTTP)
+      - "8000:8000/udp"       # RTP IN  (Asterisk → Rust mic audio)
+      - "8001:8001/udp"       # RTP OUT (Rust → Asterisk TTS audio)
     networks:
       - arilink
     restart: unless-stopped

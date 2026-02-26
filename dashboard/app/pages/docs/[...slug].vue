@@ -15,8 +15,10 @@ const slug = computed(() => {
   return Array.isArray(parts) ? parts.join("/") : parts || "overview";
 });
 
-const { data: page } = await useAsyncData(`docs-${slug.value}`, () =>
-  queryCollection("docs").path(`/docs/${slug.value}`).first(),
+const { data: page } = await useAsyncData(
+  () => `docs-${slug.value}`,
+  () => queryCollection("docs").path(`/docs/${slug.value}`).first(),
+  { watch: [slug] },
 );
 </script>
 

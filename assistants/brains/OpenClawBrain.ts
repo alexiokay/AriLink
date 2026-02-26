@@ -57,7 +57,6 @@ class OpenClawBrain implements IBrain {
     // Forward ALL transcriptions to OpenClaw
     this.harness.emitEvent("openclawTranscription", {
       sessionId: sid,
-      callId: sid,
       text: text.trim(),
       isFinal,
       callerNumber: this.callerId,
@@ -76,7 +75,6 @@ class OpenClawBrain implements IBrain {
     // Forward DTMF as special transcription
     this.harness.emitEvent("openclawTranscription", {
       sessionId: sid,
-      callId: sid,
       text: `[DTMF: ${digit}]`,
       isFinal: true,
       callerNumber: this.callerId,
@@ -94,7 +92,7 @@ class OpenClawBrain implements IBrain {
     console.log(`[OpenClawBrain][Session ${sid}] Call ended`);
 
     this.harness.emitEvent("openclawCallEnded", {
-      callId: sid,
+      sessionId: sid,
       reason: "hangup",
     });
   }

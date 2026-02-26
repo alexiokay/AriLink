@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "nuxt dev --port 3011",
+    "dev": "nuxt dev --port 3011 --dotenv ../.env",
     "build": "nuxt build",
     "start": "node .output/server/index.mjs",
     "preview": "nuxt preview",

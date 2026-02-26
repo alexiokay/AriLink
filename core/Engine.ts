@@ -26,6 +26,7 @@ class Engine extends EventEmitter {
   private dashboard: any | null = null;
   private rustProcess: any | null = null;
   private parakeetProcess: any | null = null;
+  private dockerManager: any | null = null;
   private contacts: any = null;
   private port: number;
   private rootDir: string;
@@ -59,6 +60,12 @@ class Engine extends EventEmitter {
     // Load contacts
     this.loadContacts();
 
+    // Docker container management (works when socket is mounted)
+    const { DockerManager } = require("./DockerManager");
+    this.dockerManager = new DockerManager();
+    const dockerOk = await this.dockerManager.isAvailable();
+    console.log(`[Engine] Docker management: ${dockerOk ? "available" : "not available"}`);
+
     // Create CallHistory (SQLite)
     const { CallHistory } = require("./CallHistory");
     this.callHistory = new CallHistory();
@@ -70,6 +77,10 @@ class Engine extends EventEmitter {
       (action: string, data: any) => {
         if (action === "restartParakeet") {
           this.restartParakeet();
+          return;
+        }
+        if (action === "restartContainer") {
+          this.handleContainerRestart(data.service);
           return;
         }
         if (this.controller) {
@@ -126,10 +137,12 @@ class Engine extends EventEmitter {
           this.dashboard.updateServiceStatus("asterisk", "error", `${pbxIP} unreachable`);
         }
         this.controller.connectTranscriptionWS();
+        this.controller.connectTTS();
       }
     } else {
       console.warn("[Engine] PBX_IP not set — ARI will not connect");
       this.controller.connectTranscriptionWS();
+      this.controller.connectTTS();
     }
 
     // Start auto-dialer if configured via env
@@ -190,7 +203,55 @@ class Engine extends EventEmitter {
   getDashboard() { return this.dashboard; }
   getRustProcess() { return this.rustProcess; }
   getParakeetProcess() { return this.parakeetProcess; }
+  getDockerManager() { return this.dockerManager; }
   getIO() { return this.io; }
+
+  // ── Docker container management ──
+
+  private async handleContainerRestart(service: string): Promise<void> {
+    if (!this.dockerManager || !(await this.dockerManager.isAvailable())) {
+      console.warn("[Engine] Docker management not available, cannot restart");
+      return;
+    }
+
+    // Map service slug to dashboard status key
+    const statusKeyMap: Record<string, string> = {
+      parakeet: "transcription",
+      kokoro: "tts",
+      asterisk: "asterisk",
+      "rust-rtp": "rustRtp",
+    };
+    const statusKey = statusKeyMap[service];
+
+    if (statusKey && this.dashboard) {
+      this.dashboard.updateServiceStatus(statusKey, "connecting", `Restarting ${service} container...`);
+    }
+
+    try {
+      await this.dockerManager.restartContainer(service);
+      console.log(`[Engine] Container ${service} restarted successfully`);
+
+      // After restart, reconnect the relevant service client
+      if (service === "parakeet" && this.controller) {
+        setTimeout(() => {
+          this.controller?.handleDashboardAction("reconnectTranscription", {});
+        }, 3000);
+      } else if (service === "kokoro" && this.controller) {
+        setTimeout(() => {
+          this.controller?.handleDashboardAction("reconnectTts", {});
+        }, 3000);
+      } else if (service === "asterisk" && this.controller) {
+        setTimeout(() => {
+          this.controller?.handleDashboardAction("reconnectAri", {});
+        }, 5000);
+      }
+    } catch (err: any) {
+      console.error(`[Engine] Failed to restart ${service}: ${err.message}`);
+      if (statusKey && this.dashboard) {
+        this.dashboard.updateServiceStatus(statusKey, "error", `Restart failed: ${err.message}`);
+      }
+    }
+  }
 
   // ── Private helpers ──
 
@@ -440,30 +501,29 @@ class Engine extends EventEmitter {
     }
   }
 
-  private spawnParakeetServer(host: string, port: number): Promise<any> {
-    return new Promise(async (res, rej) => {
-      // Safety: refuse to spawn if port is already in use
-      const portBusy = await this.checkTcpPort(host, port, 1000);
-      if (portBusy) {
-        rej(new Error(`Port ${port} already in use — another transcription service is running`));
-        return;
-      }
+  private async spawnParakeetServer(host: string, port: number): Promise<any> {
+    // Safety: refuse to spawn if port is already in use
+    const portBusy = await this.checkTcpPort(host, port, 1000);
+    if (portBusy) {
+      throw new Error(`Port ${port} already in use — another transcription service is running`);
+    }
 
-      const isWin = process.platform === "win32";
-      const serviceDir = path.resolve(this.rootDir, "transcription-services/parakeet-service");
+    const isWin = process.platform === "win32";
+    const serviceDir = path.resolve(this.rootDir, "transcription-services/parakeet-service");
 
-      // Find Python executable in venv
-      const venvPython = isWin
-        ? path.resolve(serviceDir, ".venv/Scripts/python.exe")
-        : path.resolve(serviceDir, ".venv/bin/python");
+    // Find Python executable in venv
+    const venvPython = isWin
+      ? path.resolve(serviceDir, ".venv/Scripts/python.exe")
+      : path.resolve(serviceDir, ".venv/bin/python");
 
-      if (!fs.existsSync(venvPython)) {
-        rej(new Error(
-          `Parakeet venv not found at ${venvPython}. ` +
-          `Run: cd transcription-services/parakeet-service && python -m venv .venv && pip install -r requirements.txt`
-        ));
-        return;
-      }
+    if (!fs.existsSync(venvPython)) {
+      throw new Error(
+        `Parakeet venv not found at ${venvPython}. ` +
+        `Run: cd transcription-services/parakeet-service && python -m venv .venv && pip install -r requirements.txt`
+      );
+    }
+
+    return new Promise((res, rej) => {
 
       const device = process.env.TRANSCRIPTION_DEVICE || "cuda";
       const args = [

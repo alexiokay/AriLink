@@ -1,3 +1,4 @@
+use audio_codec::{Decoder as _, Encoder as _};
 use serde::{Deserialize, Serialize};
 
 /// Supported audio codecs from Asterisk ExternalMedia
@@ -10,6 +11,8 @@ pub enum AudioCodec {
     Slin16,
     /// Opus (48kHz) → decoded to 16kHz PCM
     Opus,
+    /// G.722 wideband (16kHz audio, PT=9) → decoded to 16kHz PCM
+    G722,
 }
 
 impl AudioCodec {
@@ -17,6 +20,7 @@ impl AudioCodec {
         match s.to_lowercase().as_str() {
             "ulaw" | "mulaw" | "pcmu" | "g711" => AudioCodec::Ulaw,
             "opus" => AudioCodec::Opus,
+            "g722" => AudioCodec::G722,
             _ => AudioCodec::Slin16,
         }
     }
@@ -28,6 +32,7 @@ impl std::fmt::Display for AudioCodec {
             AudioCodec::Ulaw => write!(f, "ulaw"),
             AudioCodec::Slin16 => write!(f, "slin16"),
             AudioCodec::Opus => write!(f, "opus"),
+            AudioCodec::G722 => write!(f, "g722"),
         }
     }
 }
@@ -36,12 +41,20 @@ impl std::fmt::Display for AudioCodec {
 /// One processor per session (Opus decoder is stateful across packets).
 pub struct AudioProcessor {
     codec: AudioCodec,
+    g722_decoder: Option<audio_codec::g722::G722Decoder>,
     #[cfg(feature = "opus")]
     opus_decoder: Option<audiopus::coder::Decoder>,
 }
 
 impl AudioProcessor {
     pub fn new(codec: AudioCodec) -> Self {
+        let g722_decoder = if codec == AudioCodec::G722 {
+            tracing::info!("G.722 decoder initialized (output: 16kHz mono)");
+            Some(audio_codec::g722::G722Decoder::new())
+        } else {
+            None
+        };
+
         #[cfg(feature = "opus")]
         let opus_decoder = if codec == AudioCodec::Opus {
             // Decode directly to 16kHz — libopus handles internal resampling
@@ -64,6 +77,7 @@ impl AudioProcessor {
 
         Self {
             codec,
+            g722_decoder,
             #[cfg(feature = "opus")]
             opus_decoder,
         }
@@ -76,7 +90,22 @@ impl AudioProcessor {
             AudioCodec::Slin16 => decode_slin16(payload),
             AudioCodec::Ulaw => decode_ulaw(payload),
             AudioCodec::Opus => self.decode_opus(payload),
+            AudioCodec::G722 => self.decode_g722(payload),
         }
+    }
+
+    fn decode_g722(&mut self, payload: &[u8]) -> Vec<u8> {
+        let decoder = match &mut self.g722_decoder {
+            Some(d) => d,
+            None => {
+                tracing::warn!("G.722 decoder not initialized");
+                return Vec::new();
+            }
+        };
+
+        // G.722 decodes to 16kHz i16 samples natively — no resampling needed
+        let pcm: Vec<i16> = decoder.decode(payload);
+        samples_to_bytes_le(&pcm)
     }
 
     fn decode_opus(&mut self, payload: &[u8]) -> Vec<u8> {
@@ -270,5 +299,22 @@ mod tests {
         let input: Vec<i16> = vec![1, 2, 3, 4, 5];
         let output = resample_linear(&input, 16000, 16000);
         assert_eq!(output, input);
+    }
+
+    #[test]
+    fn g722_round_trip() {
+        // Encode some PCM to G.722, then decode — should get similar samples
+        let mut encoder = audio_codec::g722::G722Encoder::new();
+        let mut decoder = audio_codec::g722::G722Decoder::new();
+
+        let samples: Vec<i16> = (0..320).map(|i| ((i as f64 * 0.1).sin() * 10000.0) as i16).collect();
+        let encoded = encoder.encode(&samples);
+        let decoded = decoder.decode(&encoded);
+
+        // G.722 is lossy — just check we get reasonable output length
+        // 320 input samples → ~160 encoded bytes → ~320 decoded samples
+        assert!(decoded.len() >= 300 && decoded.len() <= 340,
+            "G.722 round-trip: input {} samples → {} encoded bytes → {} decoded samples",
+            samples.len(), encoded.len(), decoded.len());
     }
 }

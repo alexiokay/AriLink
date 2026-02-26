@@ -10,6 +10,7 @@ interface CallSessionData {
   incomingChannel: any; // ARI Channel
   outgoingChannel?: any; // ARI Channel (dialed party)
   externalMediaChannelId?: string;
+  externalMediaOutChannelId?: string; // ExternalMedia OUT for TTS injection (AEC mode)
   assistant?: any; // IAssistant instance for this session
   callerName?: string; // Transcribed caller name
   startTime: Date;
@@ -122,16 +123,41 @@ class CallSessionManager extends EventEmitter {
   }
 
   /**
-   * Update session with external media channel ID
+   * Update session with external media channel ID (IN — mic audio)
    */
   setExternalMediaChannelId(sessionId: string, channelId: string): void {
     const session = this.sessions.get(sessionId);
     if (session) {
       session.externalMediaChannelId = channelId;
       console.log(
-        `[SessionManager] Session ${sessionId} external media: ${channelId}`
+        `[SessionManager] Session ${sessionId} external media IN: ${channelId}`
       );
     }
+  }
+
+  /**
+   * Update session with external media OUT channel ID (TTS injection, AEC mode)
+   */
+  setExternalMediaOutChannelId(sessionId: string, channelId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.externalMediaOutChannelId = channelId;
+      console.log(
+        `[SessionManager] Session ${sessionId} external media OUT: ${channelId}`
+      );
+    }
+  }
+
+  /**
+   * Get a session by external media OUT channel ID
+   */
+  getSessionByExternalMediaOutId(channelId: string): CallSessionData | undefined {
+    for (const session of this.sessions.values()) {
+      if (session.externalMediaOutChannelId === channelId) {
+        return session;
+      }
+    }
+    return undefined;
   }
 
   /**
