@@ -86,13 +86,25 @@
                 <UIcon name="i-lucide-mic-2" class="size-4 text-primary" />
                 <span class="font-bold text-sm">Transcription Engine</span>
               </div>
-              <UButton
-                icon="i-lucide-rotate-cw"
-                label="Restart"
-                size="xs"
-                variant="soft"
-                @click="emit('dashboard:restartParakeet')"
-              />
+              <div class="flex items-center gap-1.5">
+                <UButton
+                  v-if="docker.status.value.available"
+                  icon="i-lucide-power"
+                  label="Restart Container"
+                  size="xs"
+                  variant="soft"
+                  color="warning"
+                  :loading="docker.restarting.value.transcription"
+                  @click="restartParakeetContainer"
+                />
+                <UButton
+                  icon="i-lucide-rotate-cw"
+                  label="Reconnect"
+                  size="xs"
+                  variant="soft"
+                  @click="emit('dashboard:restartParakeet')"
+                />
+              </div>
             </div>
           </template>
           <div v-if="transcriptionServices.length === 0" class="py-2 text-center">
@@ -313,11 +325,29 @@
             </div>
           </template>
 
-          <div class="space-y-4">
-            <UFormField 
-              v-for="v in group.vars" 
-              :key="v.key" 
-              :label="v.label" 
+          <!-- Dedicated components for groups with rich UX -->
+          <ConfigGroupTranscription
+            v-if="group.group === 'Transcription'"
+            :env-values="envValues"
+            :vars="filteredVars(group)"
+          />
+          <ConfigGroupTts
+            v-else-if="group.group === 'TTS (Text-to-Speech)'"
+            :env-values="envValues"
+            :vars="filteredVars(group)"
+          />
+          <ConfigGroupLlm
+            v-else-if="group.group === 'AI Assistant (Phone)'"
+            :env-values="envValues"
+            :vars="filteredVars(group)"
+          />
+
+          <!-- Generic group: standard env var fields only -->
+          <div v-else class="space-y-4">
+            <UFormField
+              v-for="v in filteredVars(group)"
+              :key="v.key"
+              :label="v.label"
               class="group"
             >
               <template #hint>
@@ -506,6 +536,21 @@
 
 <script setup lang="ts">
 const { serverConfig, emit } = useSocket();
+const toast = useToast();
+const docker = useDocker();
+
+onMounted(() => docker.startPolling(15000));
+onUnmounted(() => docker.stopPolling());
+
+function restartParakeetContainer() {
+  docker.restarting.value.transcription = true;
+  emit("dashboard:restartContainer", { service: "parakeet" });
+  toast.add({ title: "Restarting Parakeet", description: "Container is restarting...", color: "warning", icon: "i-lucide-power" });
+  setTimeout(() => {
+    docker.restarting.value.transcription = false;
+    docker.fetchStatus();
+  }, 8000);
+}
 
 // --- MCP Server ---
 const mcpOn = ref(true);
@@ -614,16 +659,17 @@ async function saveRouting() {
   try {
     const valid = allRoutingRules.filter(r => r.pattern && r.assistant);
     const payload = {
-      defaultAssistant: assistant.value,
       extensionRoutes: valid.filter(r => r.type === "extension").map(({ pattern, assistant }) => ({ pattern, assistant })),
       callerIdRoutes: valid.filter(r => r.type === "callerId").map(({ pattern, assistant }) => ({ pattern, assistant })),
     };
     await $fetch("/api/routing", { method: "PUT", body: payload });
     routingMessage.value = "Saved";
     setTimeout(() => { routingMessage.value = ""; }, 3000);
+    toast.add({ title: "Routing Saved", description: `${valid.length} rule(s) applied`, color: "success", icon: "i-lucide-route" });
   } catch (e: any) {
     routingError.value = true;
     routingMessage.value = e.data?.message || "Failed to save";
+    toast.add({ title: "Routing Failed", description: e.data?.message || "Failed to save", color: "error", icon: "i-lucide-alert-circle" });
   } finally {
     routingSaving.value = false;
   }
@@ -648,7 +694,90 @@ const envValues = ref<Record<string, string>>({});
 const envSaving = ref(false);
 const envMessage = ref("");
 const envError = ref(false);
+
+// Snapshot of env values at last save/load — used to detect which keys changed
+let envSnapshot: Record<string, string> = {};
+
+// Keys that trigger service reconnection when changed
+const TTS_RECONNECT_KEYS = new Set([
+  "TTS_PROVIDER", "TTS_SERVICE", "TTS_VOICE", "TTS_SPEED", "TTS_LANG",
+  "ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID", "ELEVENLABS_MODEL",
+]);
+const ARI_RECONNECT_KEYS = new Set([
+  "PBX_IP", "ASTERISK_LOGIN", "ASTERISK_PASSWORD", "STASIS_APP_NAME",
+]);
+const TRANSCRIPTION_RECONNECT_KEYS = new Set([
+  "TRANSCRIPTION_PROVIDER", "TRANSCRIPTION_SERVICES",
+]);
 const revealed = ref<Record<string, boolean>>({});
+
+// Provider computeds (used by filteredVars to decide which fields to show)
+const isElevenLabs = computed(() =>
+  (envValues.value.TTS_PROVIDER || "kokoro").toLowerCase() === "elevenlabs"
+);
+const isSttGoogle = computed(() =>
+  (envValues.value.TRANSCRIPTION_PROVIDER || "parakeet").toLowerCase() === "google"
+);
+
+// Context-aware TTS field filtering:
+// - TTS_PROVIDER always hidden (rendered as dedicated USelect above)
+// - When ElevenLabs: hide Kokoro-specific fields + raw model/voice (replaced by dropdowns)
+// - When Kokoro: hide ElevenLabs-specific fields
+const TTS_ALWAYS_HIDE = new Set(["TTS_PROVIDER"]);
+const KOKORO_ONLY_KEYS = new Set(["TTS_SERVICE", "TTS_VOICE", "TTS_SPEED"]);
+const EL_ONLY_KEYS = new Set(["ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID", "ELEVENLABS_MODEL"]);
+const EL_DROPDOWN_KEYS = new Set(["ELEVENLABS_MODEL", "ELEVENLABS_VOICE_ID"]);
+
+// Context-aware STT field filtering:
+// - TRANSCRIPTION_PROVIDER always hidden (rendered as dedicated USelect above)
+// - TRANSCRIPTION_DEVICE hidden (replaced by dedicated USelect below vars)
+// - When Google: hide local-only fields, show Google credentials
+// - When Parakeet/Whisper: hide Google credentials
+const STT_ALWAYS_HIDE = new Set(["TRANSCRIPTION_PROVIDER", "TRANSCRIPTION_DEVICE"]);
+const STT_LOCAL_ONLY_KEYS = new Set(["TRANSCRIPTION_SERVICES", "AUTO_START_TRANSCRIPTION"]);
+const STT_GOOGLE_ONLY_KEYS = new Set(["GOOGLE_CREDENTIALS_JSON"]);
+
+// Context-aware LLM field filtering:
+// - LLM_PROVIDER always hidden (rendered as dedicated USelect above)
+// - LLM_ENDPOINT: shown for ollama + custom only
+// - LLM_API_KEY: hidden for ollama (no auth needed)
+// - LLM_MODEL: always shown
+const LLM_ALWAYS_HIDE = new Set(["LLM_PROVIDER"]);
+const LLM_ENDPOINT_PROVIDERS = new Set(["ollama", "custom"]); // providers that need endpoint field
+const LLM_NO_API_KEY_PROVIDERS = new Set(["ollama"]); // providers that don't need API key
+
+const llmProvider = computed(() =>
+  (envValues.value.LLM_PROVIDER || "ollama").toLowerCase()
+);
+
+function filteredVars(group: EnvGroup) {
+  if (group.group === "TTS (Text-to-Speech)") {
+    const base = group.vars.filter((v) => !TTS_ALWAYS_HIDE.has(v.key));
+    if (isElevenLabs.value) {
+      return base.filter((v) => !KOKORO_ONLY_KEYS.has(v.key) && !EL_DROPDOWN_KEYS.has(v.key));
+    }
+    return base.filter((v) => !EL_ONLY_KEYS.has(v.key));
+  }
+
+  if (group.group === "Transcription") {
+    const base = group.vars.filter((v) => !STT_ALWAYS_HIDE.has(v.key));
+    if (isSttGoogle.value) {
+      return base.filter((v) => !STT_LOCAL_ONLY_KEYS.has(v.key));
+    }
+    return base.filter((v) => !STT_GOOGLE_ONLY_KEYS.has(v.key));
+  }
+
+  if (group.group === "AI Assistant (Phone)") {
+    return group.vars.filter((v) => {
+      if (LLM_ALWAYS_HIDE.has(v.key)) return false;
+      if (v.key === "LLM_ENDPOINT" && !LLM_ENDPOINT_PROVIDERS.has(llmProvider.value)) return false;
+      if (v.key === "LLM_API_KEY" && LLM_NO_API_KEY_PROVIDERS.has(llmProvider.value)) return false;
+      return true;
+    });
+  }
+
+  return group.vars;
+}
 
 function toggleReveal(key: string) {
   revealed.value = { ...revealed.value, [key]: !revealed.value[key] };
@@ -666,7 +795,15 @@ async function fetchEnv() {
         vals[v.key] = v.value;
       }
     }
+    // Default provider selectors when missing from .env
+    if (!vals.TTS_PROVIDER) vals.TTS_PROVIDER = "kokoro";
+    if (!vals.TRANSCRIPTION_PROVIDER) vals.TRANSCRIPTION_PROVIDER = "parakeet";
+    if (!vals.TRANSCRIPTION_DEVICE) vals.TRANSCRIPTION_DEVICE = "cuda";
+    if (!vals.LLM_PROVIDER) vals.LLM_PROVIDER = "ollama";
+
     envValues.value = vals;
+    envSnapshot = { ...vals };
+
   } catch (e) {
     console.error("Failed to fetch env:", e);
   }
@@ -677,16 +814,52 @@ async function saveEnv() {
   envMessage.value = "";
   envError.value = false;
 
+  // Snapshot before save to detect what changed
+  const before = { ...envSnapshot };
+
   try {
     await $fetch("/api/env", {
       method: "PUT",
       body: { vars: envValues.value },
     });
+
+    // Update snapshot to current values
+    envSnapshot = { ...envValues.value };
+
     envMessage.value = "Saved";
     setTimeout(() => { envMessage.value = ""; }, 3000);
+    toast.add({
+      title: "Settings Saved",
+      description: "Environment variables updated",
+      color: "success",
+      icon: "i-lucide-save",
+    });
+
+    // Auto-reconnect services whose settings changed
+    const changed = (keys: Set<string>) =>
+      [...keys].some((k) => envValues.value[k] !== before[k]);
+
+    if (changed(TTS_RECONNECT_KEYS)) {
+      emit("dashboard:reconnectTts");
+      toast.add({ title: "TTS Reconnecting", description: "Applying new TTS settings...", color: "info", icon: "i-lucide-refresh-cw" });
+    }
+    if (changed(ARI_RECONNECT_KEYS)) {
+      emit("dashboard:reconnectAri");
+      toast.add({ title: "ARI Reconnecting", description: "Applying new Asterisk settings...", color: "info", icon: "i-lucide-refresh-cw" });
+    }
+    if (changed(TRANSCRIPTION_RECONNECT_KEYS)) {
+      emit("dashboard:reconnectTranscription");
+      toast.add({ title: "Transcription Reconnecting", description: "Applying new transcription settings...", color: "info", icon: "i-lucide-refresh-cw" });
+    }
   } catch (e: any) {
     envError.value = true;
     envMessage.value = e.data?.message || "Failed to save";
+    toast.add({
+      title: "Save Failed",
+      description: e.data?.message || "Failed to save settings",
+      color: "error",
+      icon: "i-lucide-alert-circle",
+    });
   } finally {
     envSaving.value = false;
   }
@@ -813,11 +986,13 @@ async function applyImport() {
     envMessage.value = `Restored ${data.applied.length} file(s)`;
     envError.value = data.errors?.length > 0;
     setTimeout(() => { envMessage.value = ""; }, 4000);
+    toast.add({ title: "Backup Restored", description: `${data.applied.length} file(s) applied`, color: "success", icon: "i-lucide-archive" });
   } catch (e: any) {
     console.error("Import failed:", e);
     envError.value = true;
     envMessage.value = "Import failed";
     setTimeout(() => { envMessage.value = ""; }, 4000);
+    toast.add({ title: "Import Failed", description: "Could not apply backup", color: "error", icon: "i-lucide-alert-circle" });
   } finally {
     importing.value = false;
   }

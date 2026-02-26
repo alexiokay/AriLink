@@ -11,7 +11,6 @@ interface RoutingRule {
 interface RoutingConfig {
   extensionRoutes?: RoutingRule[];
   callerIdRoutes?: RoutingRule[];
-  defaultAssistant?: string;
 }
 
 let routingConfig: RoutingConfig | null = null;
@@ -72,7 +71,7 @@ function buildRegistry(): Record<string, { modulePath: string; exportName: strin
   const reg: Record<string, { modulePath: string; exportName: string }> = {};
 
   for (const entry of entries) {
-    if (entry === "base") continue;
+    if (entry === "base" || entry === "brains") continue;
     const dirPath = path.join(assistantsDir, entry);
     if (!fs.statSync(dirPath).isDirectory()) continue;
 
@@ -160,6 +159,11 @@ class AssistantFactory {
   ): IAssistant {
     const slug = type.toLowerCase();
 
+    // Ensure registry + brainRegistry are built before checking
+    if (!registry) {
+      registry = buildRegistry();
+    }
+
     // Check if this assistant type has a config.json with a "brain" field
     const assistantsDir = path.resolve(__dirname, "../assistants");
     const configPath = path.join(assistantsDir, slug, "config.json");
@@ -239,14 +243,14 @@ class AssistantFactory {
         return AssistantFactory.createByType(matched, client, sessionId, contacts);
       }
     }
-    const fallback = config.defaultAssistant || "ivr-transfer";
+    const fallback = process.env.DEFAULT_ASSISTANT || "ivr-transfer";
     return AssistantFactory.createByType(fallback, client, sessionId, contacts);
   }
 
   /**
    * Create assistant based on caller ID.
    * Reads rules from config/routing.json — callerIdRoutes array.
-   * Falls back to defaultAssistant or "ivr-transfer".
+   * Falls back to DEFAULT_ASSISTANT env var or "ivr-transfer".
    */
   static createFromCallerId(
     callerId: string,
@@ -262,7 +266,49 @@ class AssistantFactory {
         return AssistantFactory.createByType(matched, client, sessionId, contacts);
       }
     }
-    const fallback = config.defaultAssistant || "ivr-transfer";
+    const fallback = process.env.DEFAULT_ASSISTANT || "ivr-transfer";
+    return AssistantFactory.createByType(fallback, client, sessionId, contacts);
+  }
+
+  /**
+   * Create assistant using the full routing chain:
+   *   1. DID/extension routes (config/routing.json extensionRoutes)
+   *   2. CallerID routes (config/routing.json callerIdRoutes)
+   *   3. DEFAULT_ASSISTANT env var fallback
+   *   4. "ivr-transfer" hardcoded fallback
+   *
+   * This is the primary routing method for multi-tenant setups where
+   * different DIDs map to different assistants/clients.
+   */
+  static createFromRouting(
+    extension: string,
+    callerId: string,
+    client: any,
+    sessionId: string,
+    contacts?: any
+  ): IAssistant {
+    const config = loadRoutingConfig();
+    const fallback = process.env.DEFAULT_ASSISTANT || "ivr-transfer";
+
+    // 1. Try extension/DID-based routing
+    if (config.extensionRoutes?.length) {
+      const matched = matchRoute(extension, config.extensionRoutes);
+      if (matched) {
+        console.log(`[AssistantFactory] DID ${extension} matched route → ${matched}`);
+        return AssistantFactory.createByType(matched, client, sessionId, contacts);
+      }
+    }
+
+    // 2. Try callerID-based routing
+    if (config.callerIdRoutes?.length) {
+      const matched = matchRoute(callerId, config.callerIdRoutes);
+      if (matched) {
+        console.log(`[AssistantFactory] CallerID ${callerId} matched route → ${matched}`);
+        return AssistantFactory.createByType(matched, client, sessionId, contacts);
+      }
+    }
+
+    // 3. Fallback
     return AssistantFactory.createByType(fallback, client, sessionId, contacts);
   }
 
@@ -272,6 +318,29 @@ class AssistantFactory {
   static reloadRouting(): void {
     routingConfig = null;
     loadRoutingConfig();
+  }
+
+  /**
+   * Get current routing config (for dashboard API).
+   */
+  static getRoutingConfig(): RoutingConfig {
+    return loadRoutingConfig();
+  }
+
+  /**
+   * Get list of available assistant slugs.
+   */
+  static getAvailableAssistants(): string[] {
+    if (!registry) registry = buildRegistry();
+    return Object.keys(registry);
+  }
+
+  /**
+   * Get list of available brain slugs.
+   */
+  static getAvailableBrains(): string[] {
+    if (!registry) registry = buildRegistry();
+    return Object.keys(brainRegistry);
   }
 }
 

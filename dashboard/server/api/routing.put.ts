@@ -13,7 +13,6 @@ export default defineEventHandler(async (event) => {
   }
 
   const data = {
-    defaultAssistant: body.defaultAssistant || "ivr-transfer",
     extensionRoutes: Array.isArray(body.extensionRoutes) ? body.extensionRoutes : [],
     callerIdRoutes: Array.isArray(body.callerIdRoutes) ? body.callerIdRoutes : [],
   };
