@@ -2,8 +2,6 @@ const EventEmitter = require("events");
 const fs = require("fs");
 const path = require("path");
 
-require("dotenv").config({ path: path.resolve(__dirname, "../.env"), quiet: true });
-
 const { sessionManager } = require("./CallSession");
 
 interface PhoneListEntry {
@@ -82,10 +80,18 @@ class AutoDialer extends EventEmitter {
   }
 
   /**
-   * Load phone list from a JSON file
+   * Load phone list from a JSON file.
+   * Path must be within the contact-lists/ directory.
    */
   loadPhoneList(filePath: string): void {
+    const listsDir = path.resolve(__dirname, "../contact-lists");
     const absolutePath = path.resolve(filePath);
+
+    // Restrict to contact-lists directory to prevent arbitrary file reads
+    if (!absolutePath.startsWith(listsDir + path.sep) && absolutePath !== listsDir) {
+      throw new Error("Path must be within contact-lists/ directory");
+    }
+
     const raw = fs.readFileSync(absolutePath, "utf-8");
     this.phoneList = JSON.parse(raw);
     this.currentIndex = 0;

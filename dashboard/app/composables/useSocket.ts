@@ -84,6 +84,15 @@ export function useSocket() {
       campaignResults.value = [];
     });
 
+    // Auth rejection — stop reconnecting and redirect to login
+    socket.on("connect_error", (err: Error) => {
+      if (err.message === "Authentication required") {
+        socket?.disconnect();
+        socket = null;
+        navigateTo("/login");
+      }
+    });
+
     // Service health updates
     socket.on("dashboard:services", (data: Record<string, any>) => {
       services.value = data;
@@ -120,6 +129,13 @@ export function useSocket() {
       if (transcriptions.value.length > 200) transcriptions.value.length = 200;
       if (data.is_final && data.text) {
         pushActivity(data.sessionId, "transcription", data.text);
+      }
+    });
+
+    // Assistant/TTS spoke to the caller
+    socket.on("dashboard:spoken", (data: any) => {
+      if (data.text) {
+        pushActivity(data.sessionId, "spoken", data.text);
       }
     });
 

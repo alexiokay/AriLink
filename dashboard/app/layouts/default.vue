@@ -39,14 +39,25 @@
               :label="collapsed ? '' : (connected ? 'Connected' : 'Disconnected')"
               :icon="connected ? 'i-lucide-wifi' : 'i-lucide-wifi-off'"
             />
-            <UButton
-              v-if="collapsed"
-              :icon="colorMode.value === 'dark' ? 'i-lucide-sun' : 'i-lucide-moon'"
-              color="neutral"
-              variant="ghost"
-              size="xs"
-              @click="toggleColorMode"
-            />
+            <div class="flex items-center gap-1">
+              <UButton
+                v-if="authEnabled"
+                icon="i-lucide-log-out"
+                color="neutral"
+                variant="ghost"
+                size="xs"
+                :title="collapsed ? 'Sign out' : undefined"
+                @click="logout"
+              />
+              <UButton
+                v-if="collapsed"
+                :icon="colorMode.value === 'dark' ? 'i-lucide-sun' : 'i-lucide-moon'"
+                color="neutral"
+                variant="ghost"
+                size="xs"
+                @click="toggleColorMode"
+              />
+            </div>
           </div>
         </div>
       </template>
@@ -89,6 +100,7 @@
 
 <script setup lang="ts">
 const { connected } = useSocket();
+const { authEnabled, logout } = useAuth();
 const colorMode = useColorMode();
 
 function toggleColorMode() {
@@ -103,6 +115,11 @@ const navItems = computed(() => [
       label: "Dashboard",
       icon: "i-lucide-layout-dashboard",
       to: "/",
+    },
+    {
+      label: "Dashboard v2",
+      icon: "i-lucide-monitor",
+      to: "/dashboardv2",
     },
     {
       label: "Calls",

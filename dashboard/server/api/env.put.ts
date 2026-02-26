@@ -56,5 +56,11 @@ export default defineEventHandler(async (event) => {
   }
 
   writeFileSync(envPath, lines.join("\n"), "utf-8");
+
+  // Re-materialize Google credentials if they were updated
+  if (updatedKeys.has("GOOGLE_CREDENTIALS_JSON")) {
+    materializeGoogleCredentials();
+  }
+
   return { success: true };
 });

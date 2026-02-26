@@ -1,5 +1,5 @@
 import { resolve } from "path";
-import { ENV_SCHEMA, parseEnvFile } from "../utils/env-parser";
+import { ENV_SCHEMA, SENSITIVE_KEYS, MASK, parseEnvFile } from "../utils/env-parser";
 
 export default defineEventHandler(() => {
   const config = useRuntimeConfig();
@@ -8,12 +8,16 @@ export default defineEventHandler(() => {
   const fileVars = parseEnvFile(envPath);
 
   // Build response with schema + current values
+  // Mask sensitive keys — never return raw passwords/API keys
   const groups = ENV_SCHEMA.map((group) => ({
     ...group,
-    vars: group.vars.map((v) => ({
-      ...v,
-      value: fileVars[v.key] || "",
-    })),
+    vars: group.vars.map((v) => {
+      const raw = fileVars[v.key] || "";
+      return {
+        ...v,
+        value: raw && SENSITIVE_KEYS.has(v.key) ? MASK : raw,
+      };
+    }),
   }));
 
   return { groups };

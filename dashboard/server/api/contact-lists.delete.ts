@@ -1,5 +1,5 @@
 import { existsSync, unlinkSync } from "fs";
-import { resolve, join } from "path";
+import { resolve, basename } from "path";
 
 export default defineEventHandler((event) => {
   const config = useRuntimeConfig();
@@ -12,7 +12,17 @@ export default defineEventHandler((event) => {
     throw createError({ statusCode: 400, message: "id query parameter is required" });
   }
 
-  const filePath = join(listsDir, `${id}.json`);
+  // Prevent path traversal: strip directory components, allow only safe chars
+  const safeId = basename(id).replace(/\.json$/i, "");
+  if (!safeId || !/^[a-zA-Z0-9_-]+$/.test(safeId)) {
+    throw createError({ statusCode: 400, message: "Invalid id" });
+  }
+
+  const filePath = resolve(listsDir, `${safeId}.json`);
+  if (!filePath.startsWith(listsDir)) {
+    throw createError({ statusCode: 400, message: "Invalid path" });
+  }
+
   if (!existsSync(filePath)) {
     throw createError({ statusCode: 404, message: "Contact list not found" });
   }

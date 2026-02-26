@@ -20,16 +20,43 @@ export const ENV_SCHEMA = [
       { key: "EXTERNAL_HOST", label: "External Host IP", sensitive: false },
     ],
   },
+  // --- AI Pipeline: STT → LLM → TTS ---
   {
     group: "Transcription",
     icon: "i-lucide-mic",
     vars: [
-      { key: "TRANSCRIPTION_SERVICES", label: "Services (comma-separated)", sensitive: false },
-      { key: "AUTO_START_TRANSCRIPTION", label: "Auto-start local transcription", sensitive: false },
-      { key: "TRANSCRIPTION_DEVICE", label: "Inference device (cuda/cpu)", sensitive: false },
-      { key: "GOOGLE_APPLICATION_CREDENTIALS", label: "Google Credentials Path", sensitive: false },
+      { key: "TRANSCRIPTION_PROVIDER", label: "Provider", sensitive: false },
+      { key: "TRANSCRIPTION_SERVICES", label: "Service URL", sensitive: false },
+      { key: "AUTO_START_TRANSCRIPTION", label: "Auto-start local service", sensitive: false },
+      { key: "TRANSCRIPTION_DEVICE", label: "Inference device", sensitive: false },
+      { key: "GOOGLE_CREDENTIALS_JSON", label: "Google Service Account JSON", sensitive: true },
     ],
   },
+  {
+    group: "AI Assistant (Phone)",
+    icon: "i-lucide-brain",
+    vars: [
+      { key: "LLM_PROVIDER", label: "Provider", sensitive: false },
+      { key: "LLM_MODEL", label: "Model Name", sensitive: false },
+      { key: "LLM_API_KEY", label: "API Key", sensitive: true },
+      { key: "LLM_ENDPOINT", label: "Endpoint URL", sensitive: false },
+    ],
+  },
+  {
+    group: "TTS (Text-to-Speech)",
+    icon: "i-lucide-volume-2",
+    vars: [
+      { key: "TTS_PROVIDER", label: "Provider", sensitive: false },
+      { key: "TTS_SERVICE", label: "Service URL", sensitive: false },
+      { key: "TTS_VOICE", label: "Voice", sensitive: false },
+      { key: "TTS_SPEED", label: "Speed", sensitive: false },
+      { key: "TTS_LANG", label: "Language Code", sensitive: false },
+      { key: "ELEVENLABS_API_KEY", label: "ElevenLabs API Key", sensitive: true },
+      { key: "ELEVENLABS_VOICE_ID", label: "ElevenLabs Voice ID", sensitive: false },
+      { key: "ELEVENLABS_MODEL", label: "ElevenLabs Model", sensitive: false },
+    ],
+  },
+  // --- Infrastructure ---
   {
     group: "Rust RTP Server",
     icon: "i-lucide-radio",
@@ -40,7 +67,7 @@ export const ENV_SCHEMA = [
     ],
   },
   {
-    group: "AI / Code Completion",
+    group: "Code Completion",
     icon: "i-lucide-sparkles",
     vars: [
       { key: "MISTRAL_API_KEY", label: "Mistral API Key (Codestral)", sensitive: true },
