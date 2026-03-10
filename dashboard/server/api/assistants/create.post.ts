@@ -20,6 +20,9 @@ export default defineEventHandler(async (event) => {
   const assistantsDir = resolve(rootDir, "assistants");
   const newDir = resolve(assistantsDir, slug);
   const template = templateSlug || "direct-dial";
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(template)) {
+    throw createError({ statusCode: 400, message: "Invalid template slug" });
+  }
   const templateDir = resolve(assistantsDir, template);
 
   if (existsSync(newDir)) {

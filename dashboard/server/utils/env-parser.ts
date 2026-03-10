@@ -111,9 +111,10 @@ export const ENV_SCHEMA = [
 ];
 
 /** Keys that are allowed to be updated via the API */
-export const ALLOWED_KEYS = new Set(
-  ENV_SCHEMA.flatMap((g) => g.vars.map((v) => v.key))
-);
+export const ALLOWED_KEYS = new Set([
+  ...ENV_SCHEMA.flatMap((g) => g.vars.map((v) => v.key)),
+  "SETUP_SKIPPED", // Internal flag — skip setup wizard
+]);
 
 /** Keys whose values should not be overwritten with the masked placeholder */
 export const SENSITIVE_KEYS = new Set(

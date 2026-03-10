@@ -192,7 +192,7 @@
                     This wizard will connect AriLink to your Asterisk or FreePBX server seamlessly. We'll guide you through the configuration process — no prior ARI experience required.
                   </p>
                 </div>
-                <div>
+                <div class="space-y-3">
                   <UButton
                     label="Get Started"
                     icon="i-lucide-arrow-right"
@@ -202,6 +202,13 @@
                     class="w-full sm:w-auto shadow-lg"
                     @click="step = 1"
                   />
+                  <button
+                    class="block text-xs text-(--ui-text-dimmed) hover:text-(--ui-text-muted) transition-colors"
+                    :disabled="skipping"
+                    @click="skipSetup"
+                  >
+                    {{ skipping ? 'Skipping...' : 'Skip — I\'ll configure .env manually' }}
+                  </button>
                 </div>
               </div>
 
@@ -998,6 +1005,19 @@ definePageMeta({ layout: false });
 
 const { markComplete } = useSetupStatus();
 const { proActive, proTier, check: checkPro, activate } = useProStatus();
+
+const skipping = ref(false);
+
+async function skipSetup() {
+  skipping.value = true;
+  try {
+    await $fetch("/api/env", { method: "PUT", body: { vars: { SETUP_SKIPPED: "true" } } });
+    markComplete();
+    await navigateTo("/");
+  } catch {
+    skipping.value = false;
+  }
+}
 
 const licenseKey = ref("");
 const licenseActivating = ref(false);

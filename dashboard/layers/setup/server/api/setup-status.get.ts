@@ -5,10 +5,11 @@ export default defineEventHandler(() => {
   const envPath = resolve(rootDir, ".env");
   const vars = parseEnvFile(envPath);
 
+  const skipped = vars.SETUP_SKIPPED === "true";
   const missing = ESSENTIAL_KEYS.filter((k: string) => !vars[k]);
 
   return {
-    setupComplete: missing.length === 0,
+    setupComplete: skipped || missing.length === 0,
     missingKeys: missing,
     configured: {
       pbx: !!vars.PBX_IP,
