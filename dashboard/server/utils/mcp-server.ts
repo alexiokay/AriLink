@@ -340,7 +340,7 @@ function registerTools(server: McpServer) {
     description: "Update an assistant's configuration (name, prompts, behavior, language, etc.)",
     inputSchema: {
       slug: z.string().describe("Assistant slug to update"),
-      config: z.record(z.unknown()).describe("Config fields to update (merged with existing config)"),
+      config: z.record(z.string(), z.unknown()).describe("Config fields to update (merged with existing config)"),
     },
   }, async ({ slug, config: updates }) => {
     const rootDir = getProjectRoot();

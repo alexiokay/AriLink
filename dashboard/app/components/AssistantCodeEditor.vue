@@ -7,15 +7,18 @@
           v-for="tab in fileTabs"
           :key="tab.key"
           :label="tab.label"
+          :leading-icon="tab.readOnly ? 'i-lucide-lock' : undefined"
           :variant="activeFile === tab.key ? 'solid' : 'ghost'"
-          :color="activeFile === tab.key ? 'primary' : 'neutral'"
+          :color="activeFile === tab.key ? (tab.readOnly ? 'neutral' : 'primary') : 'neutral'"
           size="xs"
+          :class="tab.readOnly ? 'opacity-80' : ''"
           @click="switchFile(tab.key)"
         />
         <div class="flex-1" />
-        <span v-if="dirty" class="text-xs text-(--ui-warning)">Unsaved changes</span>
+        <span v-if="dirty && !props.readOnly && activeFile === 'main'" class="text-xs text-(--ui-warning)">Unsaved changes</span>
+        <span v-if="activeFile !== 'main'" class="flex items-center gap-1 text-xs text-(--ui-text-muted)"><UIcon name="i-lucide-lock" class="size-3" /> Read-only</span>
         <UButton
-          v-if="activeFile === 'main'"
+          v-if="activeFile === 'main' && !props.readOnly"
           label="Save"
           icon="i-lucide-save"
           color="primary"
@@ -71,7 +74,7 @@
 <script setup lang="ts">
 import { registerCompletion } from "monacopilot";
 
-const props = defineProps<{ slug: string }>();
+const props = defineProps<{ slug: string; readOnly?: boolean }>();
 
 const { $monaco } = useNuxtApp();
 const colorMode = useColorMode();
@@ -100,9 +103,9 @@ let diffEditor: any = null;
 let completionRegistration: any = null;
 
 const fileTabs = computed(() => [
-  { key: "main" as const, label: fileName.value || "Assistant.ts" },
-  { key: "base" as const, label: "BaseAssistant.ts" },
-  { key: "types" as const, label: "AssistantTypes.ts" },
+  { key: "main" as const, label: fileName.value || "Assistant.ts", readOnly: false },
+  { key: "base" as const, label: "BaseAssistant.ts", readOnly: true },
+  { key: "types" as const, label: "AssistantTypes.ts", readOnly: true },
 ]);
 
 async function fetchCode() {
@@ -139,7 +142,7 @@ function updateEditorContent() {
         ? baseCode.value
         : typesCode.value;
 
-  const isReadOnly = activeFile.value !== "main";
+  const isReadOnly = activeFile.value !== "main" || !!props.readOnly;
   editor.setValue(code);
   editor.updateOptions({ readOnly: isReadOnly });
 }
@@ -319,6 +322,7 @@ function initEditor() {
     tabSize: 2,
     wordWrap: "on",
     renderWhitespace: "selection",
+    readOnly: !!props.readOnly,
   });
 
   // Track changes for dirty state
@@ -336,7 +340,8 @@ function initEditor() {
     }
   });
 
-  // AI completions via monacopilot
+  // AI completions via monacopilot (skip for read-only presets)
+  if (props.readOnly) return;
   completionRegistration = registerCompletion(monaco, editor, {
     language: "typescript",
     endpoint: "/api/code-completion",

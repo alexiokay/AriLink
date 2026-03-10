@@ -234,7 +234,7 @@
       <div class="border-t border-(--ui-border) p-3 shrink-0">
         <div v-if="chat?.error" class="mb-2 text-xs text-(--ui-error)">
           {{ chat.error.message }}
-          <UButton label="Retry" size="xs" variant="ghost" color="error" @click="chat.reload()" />
+          <UButton label="Retry" size="xs" variant="ghost" color="error" @click="chat.regenerate()" />
         </div>
         <div class="flex gap-2">
           <UTextarea
@@ -268,7 +268,7 @@
 
 <script setup lang="ts">
 import { Chat } from "@ai-sdk/vue";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, type UIMessage } from "ai";
 import MarkdownItModule from "markdown-it";
 
 const MarkdownIt = (MarkdownItModule as any).default || MarkdownItModule;
@@ -308,7 +308,7 @@ const input = ref("");
 const messagesContainer = ref<HTMLElement | null>(null);
 const aiConfigured = ref(false);
 const loading = ref(true);
-const chat = shallowRef<Chat | null>(null);
+const chat = shallowRef<Chat<UIMessage> | null>(null);
 const activeChatId = ref("");
 const chatHistoryList = ref<ChatHistoryEntry[]>([]);
 const selectedModel = ref("codestral-latest");
@@ -395,7 +395,8 @@ function saveChatMessages(chatId: string) {
 
   // Derive label from first user message
   const firstUser = chat.value.messages.find((m: any) => m.role === "user");
-  const label = firstUser?.parts?.find((p: any) => p.type === "text")?.text?.slice(0, 40) || "Chat";
+  const textPart = firstUser?.parts?.find((p: any) => p.type === "text") as { type: "text"; text: string } | undefined;
+  const label = textPart?.text?.slice(0, 40) || "Chat";
 
   // Update local state immediately
   const entry = chatHistoryList.value.find(h => h.id === chatId);
@@ -422,7 +423,7 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-function createChatInstance(initialMessages?: any[]): Chat {
+function createChatInstance(initialMessages?: any[]): Chat<UIMessage> {
   const transport = new DefaultChatTransport({
     api: "/api/code-chat",
     body: () => ({
@@ -435,7 +436,7 @@ function createChatInstance(initialMessages?: any[]): Chat {
 
   return new Chat({
     transport,
-    initialMessages,
+    messages: initialMessages,
     onFinish: (event) => {
       try {
         if (restoredMessages.value.length > 0) restoredMessages.value = [];
@@ -495,7 +496,7 @@ async function deleteCurrentChat() {
 
   // Switch to another or create new
   if (chatHistoryList.value.length > 0) {
-    await switchToChat(chatHistoryList.value[0].id);
+    await switchToChat(chatHistoryList.value[0]!.id);
   } else {
     newChat();
   }
@@ -524,7 +525,7 @@ async function initChatSystem() {
 
   if (chatHistoryList.value.length > 0) {
     // Resume most recent chat
-    const mostRecent = chatHistoryList.value[0];
+    const mostRecent = chatHistoryList.value[0]!;
     activeChatId.value = mostRecent.id;
     const messages = await loadChatMessages(mostRecent.id);
     restoredMessages.value = messages;
@@ -560,18 +561,18 @@ function parseBlocks(text: string): Block[] {
 
   while (i < lines.length) {
     // Opening fence: ``` with optional language, nothing else on the line
-    const fenceMatch = lines[i].match(/^(`{3,})(\w*)\s*$/);
+    const fenceMatch = lines[i]!.match(/^(`{3,})(\w*)\s*$/);
     if (fenceMatch) {
       flushText();
-      const fenceLen = fenceMatch[1].length;
+      const fenceLen = fenceMatch[1]!.length;
       const lang = fenceMatch[2] || undefined;
       const codeLines: string[] = [];
       i++;
       // Closing fence: same or more backticks, NO language (bare fence)
       const closeRe = new RegExp(`^\`{${fenceLen},}\\s*$`);
       let unclosed = false;
-      while (i < lines.length && !closeRe.test(lines[i])) {
-        codeLines.push(lines[i]);
+      while (i < lines.length && !closeRe.test(lines[i]!)) {
+        codeLines.push(lines[i]!);
         i++;
       }
       if (i < lines.length) {
@@ -582,7 +583,7 @@ function parseBlocks(text: string): Block[] {
       const content = codeLines.join("\n").trim();
       if (content) blocks.push({ type: "code", content, lang, unclosed });
     } else {
-      textBuffer.push(lines[i]);
+      textBuffer.push(lines[i]!);
       i++;
     }
   }
@@ -620,7 +621,7 @@ function autoApplyLastCodeBlock(message?: any) {
     (b) => b.type === "code" && b.content.split("\n").length > 15
   );
   if (codeBlocks.length > 0) {
-    emit("applyCodeDirect", codeBlocks[codeBlocks.length - 1].content);
+    emit("applyCodeDirect", codeBlocks[codeBlocks.length - 1]!.content);
   }
 }
 
@@ -668,8 +669,8 @@ watch(
         if (!autoApply.value) return;
         const msgs = chat.value?.messages || [];
         if (msgs.length === 0) return;
-        const lastMsg = msgs[msgs.length - 1];
-        if (!lastMsg || lastMsg.role !== "assistant") return;
+        const lastMsg = msgs[msgs.length - 1]!;
+        if (lastMsg.role !== "assistant") return;
         if (lastMsg.id === lastAutoAppliedId) return; // already applied
         lastAutoAppliedId = lastMsg.id;
         autoApplyLastCodeBlock(lastMsg);

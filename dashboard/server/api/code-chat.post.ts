@@ -1,4 +1,4 @@
-import { streamText, UIMessage, convertToModelMessages, tool, stepCountIs } from "ai";
+import { streamText, type UIMessage, convertToModelMessages, tool, stepCountIs } from "ai";
 import { createMistral } from "@ai-sdk/mistral";
 import { z } from "zod";
 import { readdirSync, readFileSync, existsSync, statSync } from "fs";
@@ -56,7 +56,7 @@ ${code ? `CURRENT CODE (${fileName}):\n\`\`\`typescript\n${code}\n\`\`\`` : ""}`
     model: mistral(resolvedModel),
     system: systemPrompt,
     messages: await convertToModelMessages(messages),
-    maxTokens: 4096,
+    maxOutputTokens: 4096,
     temperature: 0.3,
     stopWhen: stepCountIs(5),
     tools: {
@@ -91,7 +91,7 @@ ${code ? `CURRENT CODE (${fileName}):\n\`\`\`typescript\n${code}\n\`\`\`` : ""}`
             const files = readdirSync(dir).filter(f => f.endsWith("Assistant.ts"));
             if (!files.length) return { error: "No *Assistant.ts file found" };
 
-            const code = readFileSync(join(dir, files[0]), "utf-8");
+            const code = readFileSync(join(dir, files[0]!), "utf-8");
             return { fileName: files[0], code };
           } catch (e: any) { return { error: e.message }; }
         },

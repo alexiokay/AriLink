@@ -835,8 +835,9 @@ const resultSummary = computed(() => {
   return counts;
 });
 
-function resultColor(result: string): string {
-  const colors: Record<string, string> = {
+type BadgeColor = "error" | "primary" | "secondary" | "success" | "info" | "warning" | "neutral";
+function resultColor(result: string): BadgeColor {
+  const colors: Record<string, BadgeColor> = {
     answered: "success",
     transferred: "info",
     no_interest: "warning",
@@ -928,7 +929,7 @@ async function exportHistoryCsv(c: CampaignHistoryEntry) {
 
 function downloadCsv(rows: Record<string, any>[], filename: string) {
   if (rows.length === 0) return;
-  const headers = Object.keys(rows[0]);
+  const headers = Object.keys(rows[0]!);
   const csvLines = [headers.join(",")];
   for (const row of rows) {
     csvLines.push(headers.map((h) => {
@@ -985,7 +986,7 @@ function formatLogTime(ts: string | number): string {
   return d.toLocaleTimeString();
 }
 
-function logLevelColor(level: string): string {
+function logLevelColor(level: string): BadgeColor {
   if (level === "error") return "error";
   if (level === "warn") return "warning";
   return "neutral";

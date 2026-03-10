@@ -23,7 +23,7 @@ const { BaseAssistant } = require("./BaseAssistant");
 const { AssistantState } = require("./AssistantTypes");
 
 import type { AssistantConfig, AssistantState as AssistantStateType } from "./AssistantTypes";
-import type { IBrain, IBrainHarness } from "./BrainTypes";
+import type { IBrain, IBrainHarness, PromptLayers } from "./BrainTypes";
 
 /**
  * Sentinel error thrown when barge-in cancels a pending speak() call.
@@ -47,6 +47,7 @@ const FILLER_SOUNDS = new Set([
 class BrainHarness extends BaseAssistant implements IBrainHarness {
   private brain: IBrain;
   private contacts: any;
+  private _layers: PromptLayers;
   private callerId: string = "";
   private extension: string = "";
   private speakResolve: (() => void) | null = null; // For awaitable speak()
@@ -63,11 +64,13 @@ class BrainHarness extends BaseAssistant implements IBrainHarness {
     client: any,
     sessionId: string,
     contacts: any,
-    brain: IBrain
+    brain: IBrain,
+    layers?: PromptLayers
   ) {
     super(config, client, sessionId);
     this.contacts = contacts;
     this.brain = brain;
+    this._layers = layers ?? { systemPrompt: null, guardrails: null, knowledge: [] };
 
     // Read turn debounce from per-agent config
     const behavior: any = config.behavior || {};
@@ -75,6 +78,10 @@ class BrainHarness extends BaseAssistant implements IBrainHarness {
 
     // Give the brain access to the harness
     this.brain.init(this);
+  }
+
+  get layers(): PromptLayers {
+    return this._layers;
   }
 
   // ── Lifecycle (delegates to brain) ──

@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
 
   let found = false;
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim().startsWith("PRO_LICENSE_KEY=")) {
+    if (lines[i]!.trim().startsWith("PRO_LICENSE_KEY=")) {
       lines[i] = `PRO_LICENSE_KEY=${key}`;
       found = true;
       break;

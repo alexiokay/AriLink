@@ -116,11 +116,7 @@ const navItems = computed(() => [
       icon: "i-lucide-layout-dashboard",
       to: "/",
     },
-    {
-      label: "Dashboard v2",
-      icon: "i-lucide-monitor",
-      to: "/dashboardv2",
-    },
+
     {
       label: "Calls",
       icon: "i-lucide-phone",

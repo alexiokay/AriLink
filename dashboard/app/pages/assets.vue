@@ -117,7 +117,7 @@
                   size="sm"
                   variant="subtle"
                   class="w-44"
-                  :ui="{ icon: { leading: { class: 'text-(--ui-text-dimmed)' } } }"
+                  :ui="{ leadingIcon: 'text-(--ui-text-dimmed)' }"
                 />
                 <label class="flex items-center gap-2 cursor-pointer text-sm text-(--ui-text-muted)">
                   <USwitch v-model="autoConvert" size="sm" />

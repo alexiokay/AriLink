@@ -954,7 +954,7 @@ exten => _X.,1,NoOp(AriLink — Incoming: $&#123;CALLERID(num)&#125; to $&#123;E
                 </div>
                 <UBadge
                   :label="isTierUnlocked(tier.id) ? 'Unlocked' : tier.price"
-                  :color="isTierUnlocked(tier.id) ? 'success' : tier.color"
+                  :color="isTierUnlocked(tier.id) ? 'success' : (tier.color as any)"
                   variant="subtle"
                   size="md"
                 />
@@ -1127,7 +1127,7 @@ async function detectListenerIp() {
     const { ips } = await $fetch<{ ips: string[] }>("/api/detect-ip");
     autoConfig.detectedIps = ips;
     if (ips.length === 1 && !autoConfig.listenerIp) {
-      autoConfig.listenerIp = ips[0];
+      autoConfig.listenerIp = ips[0]!;
     }
   } catch {}
 }

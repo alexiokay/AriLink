@@ -189,7 +189,7 @@
         :key="'term-' + tab.id"
         v-show="tab.id === activeTabId"
         class="flex-1 overflow-hidden"
-        :ui="{ body: { padding: 'p-0', base: 'h-full' } }"
+        :ui="{ body: 'p-0 h-full' }"
       >
         <div :ref="(el: any) => setContainer(tab.id, el)" class="w-full h-full bg-black"></div>
       </UCard>
@@ -498,7 +498,7 @@ function closeTab(tabId: string) {
   const idx = tabs.findIndex(t => t.id === tabId);
   if (idx < 0) return;
 
-  const tab = tabs[idx];
+  const tab = tabs[idx]!;
 
   if (tab.connected || tab.started) {
     emit('terminal:stop', { tabId: tab.id });
@@ -509,7 +509,7 @@ function closeTab(tabId: string) {
   tabs.splice(idx, 1);
 
   if (activeTabId.value === tabId && tabs.length > 0) {
-    switchTab(tabs[Math.min(idx, tabs.length - 1)].id);
+    switchTab(tabs[Math.min(idx, tabs.length - 1)]!.id);
   }
 }
 
@@ -617,7 +617,7 @@ function handleAuthInput(tabId: string, data: string) {
   if (!tab?.terminal) return;
 
   for (let i = 0; i < data.length; i++) {
-    const char = data[i];
+    const char = data[i]!;
 
     if (char === '\r' || char === '\n') {
       const val = tab.authBuffer;

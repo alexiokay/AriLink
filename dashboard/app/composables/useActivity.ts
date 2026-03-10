@@ -6,7 +6,8 @@ const stateLabels: Record<string, string> = {
   transferring: "Transferring call",
 };
 
-const stateMap: Record<string, { label: string; color: string; icon: string }> = {
+type BadgeColor = "error" | "primary" | "secondary" | "success" | "info" | "warning" | "neutral";
+const stateMap: Record<string, { label: string; color: BadgeColor; icon: string }> = {
   idle: { label: "Idle", color: "neutral", icon: "i-lucide-pause" },
   listening: { label: "Listening", color: "success", icon: "i-lucide-ear" },
   processing: { label: "Processing", color: "warning", icon: "i-lucide-loader" },

@@ -3,7 +3,7 @@ import { resolve } from "path";
 
 export default defineEventHandler(async (event) => {
   const slug = getRouterParam(event, "slug");
-  if (!slug || slug === "base" || slug.includes("..") || slug.includes("/") || slug.includes("\\")) {
+  if (!slug || slug === "base" || !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(slug)) {
     throw createError({ statusCode: 400, message: "Invalid assistant slug" });
   }
 
@@ -33,11 +33,12 @@ export default defineEventHandler(async (event) => {
   if (!parsed.name) {
     throw createError({ statusCode: 400, message: "Config must have a 'name'" });
   }
+  // Ensure prompts and behavior exist as objects (default to empty if missing)
   if (!parsed.prompts || typeof parsed.prompts !== "object") {
-    throw createError({ statusCode: 400, message: "Config must have a 'prompts' object" });
+    parsed.prompts = {};
   }
   if (!parsed.behavior || typeof parsed.behavior !== "object") {
-    throw createError({ statusCode: 400, message: "Config must have a 'behavior' object" });
+    parsed.behavior = {};
   }
 
   // Coerce and validate numeric behavior fields
@@ -56,6 +57,28 @@ export default defineEventHandler(async (event) => {
         throw createError({ statusCode: 400, message: `behavior.${key} must be a number` });
       }
       parsed.behavior[key] = Math.min(bounds.max, Math.max(bounds.min, Math.round(val)));
+    }
+  }
+
+  // LLM Chat brain: validate additional numeric fields
+  if (parsed.brain === "llm-chat") {
+    const llmBounds: Record<string, { min: number; max: number }> = {
+      temperature: { min: 0, max: 2 },
+      maxTokens: { min: 1, max: 32000 },
+      maxHistory: { min: 1, max: 100 },
+      silenceTimeoutSec: { min: 0, max: 300 },
+      maxSilenceReprompts: { min: 0, max: 10 },
+      turnDebounceMs: { min: 100, max: 5000 },
+    };
+    for (const [key, bounds] of Object.entries(llmBounds)) {
+      if (key in parsed.behavior) {
+        const val = Number(parsed.behavior[key]);
+        if (!isNaN(val)) {
+          parsed.behavior[key] = key === "temperature"
+            ? Math.min(bounds.max, Math.max(bounds.min, Math.round(val * 10) / 10))
+            : Math.min(bounds.max, Math.max(bounds.min, Math.round(val)));
+        }
+      }
     }
   }
 

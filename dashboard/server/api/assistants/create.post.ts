@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync } from "fs";
 import { resolve, join } from "path";
 
 export default defineEventHandler(async (event) => {
@@ -44,7 +44,7 @@ export default defineEventHandler(async (event) => {
     // Build PascalCase class name, strip trailing "Assistant" to avoid double suffix
     const base = slug
       .split("-")
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
       .join("");
     const className = base.endsWith("Assistant") ? base : base + "Assistant";
     const newTsName = className + ".ts";
@@ -54,6 +54,26 @@ export default defineEventHandler(async (event) => {
     code = code.replaceAll(oldClassName, className);
 
     writeFileSync(join(newDir, newTsName), code, "utf-8");
+  }
+
+  // Copy .md layer files if they exist in the template
+  for (const mdFile of ["system-prompt.md", "guardrails.md"]) {
+    const src = join(templateDir, mdFile);
+    if (existsSync(src)) {
+      copyFileSync(src, join(newDir, mdFile));
+    }
+  }
+
+  // Copy knowledge/ directory if it exists
+  const templateKnowledgeDir = join(templateDir, "knowledge");
+  if (existsSync(templateKnowledgeDir)) {
+    const newKnowledgeDir = join(newDir, "knowledge");
+    mkdirSync(newKnowledgeDir, { recursive: true });
+    for (const f of readdirSync(templateKnowledgeDir)) {
+      if (f.endsWith(".md") || f === ".gitkeep") {
+        copyFileSync(join(templateKnowledgeDir, f), join(newKnowledgeDir, f));
+      }
+    }
   }
 
   return { success: true, slug, name };

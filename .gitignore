@@ -123,6 +123,9 @@ core/AutoConfigure.ts
 # Claude Code project memory
 .claude/
 
+# CodeGraph index
+.codegraph/
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

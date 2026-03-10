@@ -60,6 +60,7 @@ graph TB
 
             subgraph "Pluggable Brains"
                 LLMBrain[LlmChatBrain]
+                FlowBrainNode[FlowBrain]
                 IVRBrain[IvrTransferBrain]
                 DDBrain[DirectDialBrain]
                 OCBrain[OpenClawBrain]
@@ -87,6 +88,7 @@ graph TB
     Harness -.inherits.-> Base
 
     Harness --> LLMBrain
+    Harness --> FlowBrainNode
     Harness --> IVRBrain
     Harness --> DDBrain
     Harness --> OCBrain
@@ -106,6 +108,7 @@ graph TB
     style LLMBrain fill:#e7d4ed
     style IVRBrain fill:#e7d4ed
     style DDBrain fill:#e7d4ed
+    style FlowBrainNode fill:#e7d4ed
     style OCBrain fill:#e7d4ed
 ```
 
@@ -189,6 +192,7 @@ classDiagram
     BaseAssistant <|-- BrainHarness
     BrainHarness o-- IBrain : delegates to
     IBrain <|.. LlmChatBrain
+    IBrain <|.. FlowBrain
     IBrain <|.. IvrTransferBrain
     IBrain <|.. DirectDialBrain
     IBrain <|.. OpenClawBrain
@@ -328,17 +332,33 @@ arilink/
 │   ├── base/
 │   │   ├── AssistantTypes.ts          # IAssistant, AssistantConfig, AssistantState
 │   │   ├── BaseAssistant.ts           # Abstract base class (playAudio, setState, etc.)
-│   │   ├── BrainTypes.ts              # IBrain, IBrainHarness interfaces
+│   │   ├── BrainTypes.ts              # IBrain, IBrainHarness, AgentTool, ToolContext
 │   │   └── BrainHarness.ts            # Universal assistant that delegates to a brain
 │   │
 │   ├── brains/                        # Pluggable brain implementations
-│   │   ├── LlmChatBrain.ts           # Streaming LLM + TTS conversational agent
+│   │   ├── LlmChatBrain.ts           # Streaming LLM + TTS + tool calling
+│   │   ├── FlowBrain.ts              # Declarative IVR flow engine (reads flow.json)
 │   │   ├── IvrTransferBrain.ts        # DTMF → voice → contact match → transfer
 │   │   ├── DirectDialBrain.ts         # Voice → contact match → transfer
 │   │   └── OpenClawBrain.ts           # Forward transcriptions to OpenClaw AI
 │   │
-│   ├── llm-chat/
+│   ├── llm-chat/                      # Built-in LLM chat preset
 │   │   └── config.json
+│   │
+│   ├── dentist/                       # Example: LLM assistant
+│   │   ├── config.json                # { "brain": "llm-chat", "clinicId": "..." }
+│   │   ├── system-prompt.md           # Assistant personality
+│   │   ├── guardrails.md              # Topic restrictions (Safety Sandwich)
+│   │   ├── knowledge/
+│   │   │   ├── hours.md               # Injected into prompt
+│   │   │   └── services.md
+│   │   ├── tools.json                 # Declarative tools (http/webhook/transfer/shell)
+│   │   └── tools/
+│   │       └── book-appointment.ts    # Escape hatch: full Node.js module tool
+│   │
+│   ├── my-ivr/                        # Example: Flow assistant
+│   │   ├── config.json                # { "brain": "flow" }
+│   │   └── flow.json                  # Visual flow definition (saved by builder)
 │   │
 │   ├── ivr-transfer/
 │   │   ├── IvrTransferAssistant.ts    # Classic assistant (standalone)
@@ -358,8 +378,10 @@ arilink/
 │
 ├── core/
 │   ├── AriControllerServer.ts         # Main controller, uses AssistantFactory
-│   ├── AssistantFactory.ts            # Creates assistants (classic or brain-based)
+│   ├── AssistantFactory.ts            # Creates assistants; reads layers + tools
+│   ├── ToolExecutor.ts                # Executes tool calls (http/webhook/shell/module/mcp)
 │   ├── TtsClient.ts                   # WebSocket client for Kokoro TTS
+│   ├── ElevenLabsTtsClient.ts         # ElevenLabs TTS provider
 │   ├── DashboardServer.ts             # Socket.IO hub for dashboard + OpenClaw
 │   └── ...
 │
@@ -406,6 +428,8 @@ AssistantFactory.createByType("openclaw", client, sessionId)
 
 | Use Case | Approach |
 |----------|----------|
+| Scripted IVR phone tree (no code, no AI) | FlowBrain — visual drag-and-drop builder |
+| AI-powered conversation with tools | LlmChatBrain — streaming LLM + TTS |
 | Simple, self-contained logic | Classic assistant |
 | Swappable behavior via config | Brain + BrainHarness |
 | OpenClaw / AI integration | Brain (OpenClawBrain) |
@@ -455,6 +479,7 @@ Methods available to brains via `this.harness`:
 | Brain | Slug | Flow |
 |-------|------|------|
 | LLM Chat | `llm-chat` | Welcome → listen → streaming LLM → sentence-by-sentence TTS → barge-in |
+| Flow | `flow` | Declarative state machine from `flow.json` — zero LLM cost, instant responses |
 | IVR Transfer | `ivr-transfer` | Welcome → DTMF gate → voice → contact match → transfer |
 | Direct Dial | `direct-dial` | Welcome → voice → contact match → transfer |
 | OpenClaw | `openclaw` | Welcome → listen → forward to OpenClaw AI → TTS response |
@@ -538,6 +563,174 @@ When the user speaks during bot speech:
 ### Interim Transcription Passthrough
 
 Interim (non-final) transcriptions bypass all filtering and debouncing, passing directly to the brain. This is needed by brains like OpenClawBrain that process interim results.
+
+---
+
+## FlowBrain — Declarative IVR Flow Engine
+
+FlowBrain is a deterministic state machine that reads a `flow.json` file and executes it node by node. Zero LLM cost, instant responses, fully predictable.
+
+### How It Works
+
+```
+flow.json (saved by visual builder or hand-written)
+    ↓
+FlowBrain.init() — loads flow definition
+    ↓
+onCallStart() — sets built-in variables, transitions to startNode
+    ↓
+transitionTo(nodeId) — executes current node:
+    message  → play audio/TTS → auto-advance to next
+    menu     → play audio/TTS → wait for DTMF → branch by key
+    collect  → play audio/TTS → wait for speech → store in variable → advance
+    condition → evaluate variable → branch true/false
+    transfer → transfer the call
+    hangup   → play goodbye → hang up
+    http_request → call external API → store result → advance
+    set_variable → assign value → advance
+    trigger  → pass-through entry point → advance
+```
+
+### Audio & Speech Pipeline
+
+The STT pipeline (Parakeet/Google) runs continuously during the call — audio is always streaming. FlowBrain uses the **assistant state** as a gate:
+
+- **SPEAKING** — FlowBrain is playing audio or TTS. Transcriptions arrive but are ignored.
+- **LISTENING** — FlowBrain is waiting for input. Transcriptions and DTMF are processed.
+- **PROCESSING** — FlowBrain is executing an HTTP request. Input is ignored.
+
+This is the same mechanism used by LlmChatBrain. The difference is what happens with the input:
+- LLM brain sends transcriptions to the AI model for open-ended conversation
+- Flow brain stores transcriptions in a variable and advances to the next node
+
+### Node Types
+
+| Type | Fields | Runtime Behavior |
+|------|--------|-----------------|
+| `trigger` | — | Entry point, pass-through to next node. Shows built-in variables in UI. |
+| `message` | `audio`, `text`, `next` | Play audio (TTS fallback), auto-transition to `next` |
+| `menu` | `audio`, `text`, `options`, `timeout` | Play audio, wait for DTMF, branch by key. Retries on invalid/no input. |
+| `collect` | `audio`, `text`, `next`, `variable` | Play audio, wait for speech, store in variable, go to `next` |
+| `condition` | `variable`, `operator`, `compareValue`, `trueNext`, `falseNext` | Evaluate variable, branch true/false |
+| `transfer` | `extension` | Transfer the call to an extension |
+| `hangup` | `audio`, `text` | Optional goodbye audio, then hang up |
+| `http_request` | `method`, `url`, `headersJson`, `bodyJson`, `resultVariable`, `next` | Call external API, store response, advance |
+| `set_variable` | `variable`, `value`, `next` | Assign a value to a variable, advance |
+
+### Variables
+
+Variables are string key-value pairs stored in memory during a call. They can be referenced in text fields using `{{variable}}` syntax.
+
+**Built-in variables** (set automatically at call start):
+
+| Variable | Description |
+|----------|-------------|
+| `{{caller}}` | Caller ID |
+| `{{extension}}` | Dialed extension |
+| `{{date}}` | Current date (locale format) |
+| `{{time}}` | Current time (HH:MM) |
+| `{{timestamp}}` | ISO 8601 timestamp |
+| `{{digit}}` | Last DTMF key pressed |
+
+**User-defined variables** are created by:
+- **Collect** node — stores speech transcription
+- **Set Variable** node — assigns a static or interpolated value
+- **HTTP Request** node — stores API response
+
+Variable interpolation (`{{var}}`) works in: TTS text, HTTP URL, HTTP headers, HTTP body, Set Variable value, and Condition compare value.
+
+### Condition Operators
+
+| Operator | Description |
+|----------|-------------|
+| `equals` | Exact string match |
+| `not_equals` | Not equal |
+| `contains` | Substring match |
+| `not_empty` | Variable has a value |
+| `empty` | Variable is empty or unset |
+| `gt` | Numeric greater than |
+| `lt` | Numeric less than |
+
+### Menu Timeout & Retries
+
+Menu nodes support configurable timeout behavior:
+- `timeout.seconds` — how long to wait for DTMF (default: 10s)
+- `timeout.retries` — max replay attempts before giving up (default: 3)
+- `timeout.next` — fallback node when retries exhausted (or falls back to `node.next`)
+
+Invalid DTMF keys also count as retries and replay the menu prompt.
+
+### flow.json Format
+
+```json
+{
+  "startNode": "welcome",
+  "nodes": {
+    "trigger_1": {
+      "type": "trigger",
+      "label": "Call Start",
+      "next": "welcome",
+      "position": { "x": 250, "y": 0 }
+    },
+    "welcome": {
+      "type": "message",
+      "label": "Welcome",
+      "audio": "custom/welcome",
+      "text": "Welcome to our service.",
+      "next": "main_menu",
+      "position": { "x": 250, "y": 150 }
+    },
+    "main_menu": {
+      "type": "menu",
+      "label": "Main Menu",
+      "text": "Press 1 for sales, 2 for support, 0 for operator.",
+      "options": { "1": "sales", "2": "support", "0": "operator" },
+      "timeout": { "seconds": 10, "retries": 3, "next": "goodbye" },
+      "next": "goodbye",
+      "position": { "x": 250, "y": 300 }
+    },
+    "operator": {
+      "type": "transfer",
+      "label": "Operator",
+      "extension": "200",
+      "position": { "x": 500, "y": 450 }
+    },
+    "goodbye": {
+      "type": "hangup",
+      "label": "Goodbye",
+      "text": "Thank you for calling. Goodbye!",
+      "position": { "x": 250, "y": 550 }
+    }
+  }
+}
+```
+
+### Visual Flow Builder
+
+Flow brain assistants have a visual drag-and-drop editor in the dashboard (Flow tab) built with `@vue-flow/core`. The editor:
+
+- Renders each node type as a custom Vue component with inline editing
+- Connects nodes via draggable edges (handles on node borders)
+- Auto-creates a Trigger node as the flow entry point
+- Serializes the canvas to `flow.json` on save, deserializes on load
+- Variable picker shows only variables reachable from upstream nodes
+- Audio picker loads available sound files from the Assets API
+
+The Code and Prompt tabs are hidden for flow brains since the logic is entirely visual.
+
+### Dashboard Tabs for Flow Brains
+
+| Tab | Content |
+|-----|---------|
+| **Flow** | Visual flow builder canvas |
+| **Config** | config.json editor (name, brain, language, etc.) |
+
+### API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/assistants/[slug]/flow` | Read flow.json |
+| `PUT /api/assistants/[slug]/flow` | Validate and write flow.json |
 
 ---
 
@@ -643,8 +836,51 @@ TTS_SPEED=1.0
 
 ---
 
+## Tool Calling
+
+LLM-based assistants (using `LlmChatBrain`) can call external tools: HTTP APIs, webhooks, shell commands, Node.js modules, and MCP servers.
+
+### How it works
+
+```
+LLM response with finish_reason: "tool_calls"
+    ↓
+ToolExecutor.execute(name, args)    ← core/ToolExecutor.ts
+    ↓  (http / webhook / transfer / hangup / shell / module / mcp)
+Result → wrapped in <tool_result> tags → pushed to history
+    ↓
+LLM called again → speaks response
+    (loop up to MAX_TOOL_TURNS = 5)
+```
+
+### Configuring tools
+
+Each assistant can have:
+- **`tools.json`** — declarative tools (no code needed)
+- **`tools/*.ts`** — module tools (full Node.js, auto-discovered)
+- **`mcpServers` in config.json** — MCP servers (tools auto-discovered at call start)
+
+### Handler types
+
+| Type | What it does |
+|------|-------------|
+| `http` | `fetch()` GET/POST with template variable substitution |
+| `webhook` | POST all LLM args as JSON to a URL |
+| `transfer` | `harness.transferCall(extension)` |
+| `hangup` | `harness.hangup()` |
+| `shell` | `child_process.exec()` with timeout, stdout as result |
+| `module` | `require(file).execute(args, ctx)` — full Node.js |
+| `mcp` | JSON-RPC 2.0 POST to MCP server |
+
+See [AGENT-TOOLS.md](AGENT-TOOLS.md) for full documentation, examples, and the dentist assistant walkthrough.
+
+---
+
 ## Related Documentation
 
+- [Agent Tools](AGENT-TOOLS.md) — Tool calling, MCP servers, module tools, full examples
+- [AI Safety Guardrails](AI-SAFETY-GUARDRAILS.md) — Prompt injection, spotlighting, Safety Sandwich
+- [Security Guide](SECURITY.md) — Auth, SSRF protection, path traversal, env vars
 - [OpenClaw Integration](OPENCLAW-INTEGRATION.md) — Connect AriLink to OpenClaw AI agents
 - [Docker Setup](docker.md) — Run the full stack with Docker
 - [FreePBX Setup](freepbx-setup.md) — FreePBX configuration

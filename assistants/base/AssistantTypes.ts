@@ -35,6 +35,7 @@ export interface AssistantConfig {
     maxConcurrent: number;
     trunk: string;
   };
+  mcpServers?: Array<{ url: string; name?: string }>;
 }
 
 export interface IAssistant {

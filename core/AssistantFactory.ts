@@ -2,6 +2,82 @@ const path = require("path");
 const fs = require("fs");
 
 import type { IAssistant, AssistantConfig } from "../assistants/base/AssistantTypes";
+import type { PromptLayers } from "../assistants/base/BrainTypes";
+
+/**
+ * Read prompt layers (.md files) from an assistant's directory.
+ * Returns null values for layers that don't have a file yet.
+ */
+function readLayers(assistantDir: string): PromptLayers {
+  const read = (file: string): string | null => {
+    const p = path.join(assistantDir, file);
+    return fs.existsSync(p) ? fs.readFileSync(p, "utf-8") : null;
+  };
+
+  const layers: PromptLayers = {
+    systemPrompt: read("system-prompt.md"),
+    guardrails: read("guardrails.md"),
+    knowledge: [],
+    tools: [],
+  };
+
+  const knowledgeDir = path.join(assistantDir, "knowledge");
+  if (fs.existsSync(knowledgeDir) && fs.statSync(knowledgeDir).isDirectory()) {
+    const files: string[] = fs.readdirSync(knowledgeDir);
+    for (const f of files) {
+      if (!f.endsWith(".md")) continue;
+      const content = fs.readFileSync(path.join(knowledgeDir, f), "utf-8");
+      layers.knowledge.push({ name: f.replace(/\.md$/, ""), content });
+    }
+  }
+
+  // Load tools from tools.json (declarative: http/webhook/transfer/hangup/shell/module)
+  const toolsJsonPath = path.join(assistantDir, "tools.json");
+  if (fs.existsSync(toolsJsonPath)) {
+    try {
+      const toolDefs: any[] = JSON.parse(fs.readFileSync(toolsJsonPath, "utf-8"));
+      for (const t of toolDefs) {
+        if (t.name && t.description && t.handler) {
+          layers.tools.push({ ...t, _assistantDir: assistantDir });
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[AssistantFactory] Failed to parse tools.json in ${assistantDir}: ${err.message}`);
+    }
+  }
+
+  // Auto-discover module tools from tools/*.ts that export a `definition`
+  const toolsModDir = path.join(assistantDir, "tools");
+  if (fs.existsSync(toolsModDir) && fs.statSync(toolsModDir).isDirectory()) {
+    const files: string[] = fs.readdirSync(toolsModDir);
+    for (const f of files) {
+      if ((!f.endsWith(".ts") && !f.endsWith(".js")) || f.endsWith(".d.ts")) continue;
+      const modPath = path.join(toolsModDir, f);
+      try {
+        const mod = require(modPath);
+        if (mod.definition && mod.definition.name) {
+          // Only add if not already declared in tools.json
+          const alreadyDeclared = layers.tools.some((t) => t.name === mod.definition.name);
+          if (!alreadyDeclared) {
+            layers.tools.push({
+              ...mod.definition,
+              handler: { type: "module", file: modPath },
+              _assistantDir: assistantDir,
+            });
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[AssistantFactory] Failed to load tool module ${modPath}: ${err.message}`);
+      }
+    }
+  }
+
+  if (layers.tools.length > 0) {
+    console.log(`[AssistantFactory] Loaded ${layers.tools.length} tools from ${path.basename(assistantDir)}: ${layers.tools.map((t) => t.name).join(", ")}`);
+  }
+
+  return layers;
+}
 
 // Routing config: maps extensions/callerIDs to assistant types
 interface RoutingRule {
@@ -145,6 +221,23 @@ function getAssistantClass(type: string): any {
 
 class AssistantFactory {
   /**
+   * Read flow.json from an assistant directory.
+   * Returns parsed FlowDefinition or null if not found.
+   */
+  static readFlow(assistantDir: string): any {
+    const flowPath = path.join(assistantDir, "flow.json");
+    if (!fs.existsSync(flowPath)) return null;
+    try {
+      const raw = fs.readFileSync(flowPath, "utf-8");
+      const flow = JSON.parse(raw);
+      if (flow.startNode && flow.nodes) return flow;
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Create assistant by explicit type name (slug matches folder name).
    *
    * If the assistant's config.json has a "brain" field, creates a BrainHarness
@@ -170,12 +263,23 @@ class AssistantFactory {
 
     if (fs.existsSync(configPath)) {
       try {
-        const config: AssistantConfig & { brain?: string } = JSON.parse(
+        const config: AssistantConfig & { brain?: string; _flow?: any } = JSON.parse(
           fs.readFileSync(configPath, "utf-8")
         );
 
         if (config.brain && brainRegistry[config.brain]) {
-          return AssistantFactory.createWithBrain(config, config.brain, client, sessionId, contacts);
+          const assistantDir = path.join(assistantsDir, slug);
+          const layers = readLayers(assistantDir);
+
+          // For flow brains, inject the flow definition into config
+          if (config.brain === "flow") {
+            const flowData = AssistantFactory.readFlow(assistantDir);
+            if (flowData) {
+              config._flow = flowData;
+            }
+          }
+
+          return AssistantFactory.createWithBrain(config, config.brain, client, sessionId, contacts, layers);
         }
       } catch {
         // Fall through to classic assistant creation
@@ -196,7 +300,8 @@ class AssistantFactory {
     brainName: string,
     client: any,
     sessionId: string,
-    contacts?: any
+    contacts?: any,
+    layers?: PromptLayers
   ): IAssistant {
     const brainEntry = brainRegistry[brainName];
     if (!brainEntry) {
@@ -221,7 +326,7 @@ class AssistantFactory {
 
     const brain = new BrainClass();
     console.log(`[AssistantFactory] Creating BrainHarness with brain: ${brainName}`);
-    return new BrainHarness(config, client, sessionId, contacts, brain);
+    return new BrainHarness(config, client, sessionId, contacts, brain, layers);
   }
 
   /**

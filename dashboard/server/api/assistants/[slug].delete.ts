@@ -3,7 +3,7 @@ import { resolve } from "path";
 
 export default defineEventHandler(async (event) => {
   const slug = getRouterParam(event, "slug");
-  if (!slug || slug === "base" || slug.includes("..") || slug.includes("/") || slug.includes("\\")) {
+  if (!slug || slug === "base" || !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(slug)) {
     throw createError({ statusCode: 400, message: "Invalid assistant slug" });
   }
 

@@ -27,7 +27,7 @@
             <template v-if="slugError" #error>{{ slugError }}</template>
           </UFormField>
 
-          <UFormField label="Template" hint="Clone code and config from">
+          <UFormField label="Template" hint="Clone config from (PRESET = shared logic, CODE = custom)">
             <div class="space-y-2 mt-1">
               <button
                 v-for="t in templateCards"
@@ -49,6 +49,7 @@
                     <span class="text-sm font-medium" :class="templateSlug === t.value ? 'text-(--ui-primary)' : 'text-(--ui-text)'">
                       {{ t.label }}
                     </span>
+                    <UBadge :label="t.brain ? 'PRESET' : 'CODE'" :color="t.brain ? 'info' : 'success'" variant="subtle" size="xs" />
                     <UBadge v-if="t.mode" :label="t.mode" :color="t.mode === 'outbound' ? 'warning' : 'info'" variant="subtle" size="xs" />
                   </div>
                   <p v-if="t.description" class="text-xs text-(--ui-text-dimmed) mt-0.5 leading-relaxed">{{ t.description }}</p>
@@ -93,7 +94,7 @@
 
 <script setup lang="ts">
 const props = defineProps<{
-  templates: { slug: string; config: any }[];
+  templates: { slug: string; config: any; brain: string | null }[];
 }>();
 
 const emit = defineEmits<{
@@ -121,7 +122,8 @@ const templateCards = computed(() =>
     value: t.slug,
     description: t.config?.description || "",
     mode: t.config?.mode || "",
-    icon: iconMap[t.slug] || "i-lucide-bot",
+    brain: t.brain,
+    icon: iconMap[t.slug] || (t.brain ? "i-lucide-puzzle" : "i-lucide-bot"),
   }))
 );
 

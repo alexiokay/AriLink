@@ -42,6 +42,12 @@
             <div class="flex items-center gap-1.5 mt-0.5">
               <span class="text-[10px] text-(--ui-text-dimmed) font-mono">{{ a.slug }}</span>
               <UBadge
+                :label="a.brain === 'flow' ? 'FLOW' : a.brain ? 'PRESET' : 'CODE'"
+                :color="a.brain === 'flow' ? 'warning' : a.brain ? 'info' : 'success'"
+                variant="subtle"
+                size="xs"
+              />
+              <UBadge
                 v-if="a.config?.mode === 'outbound'"
                 label="OUT"
                 color="warning"
@@ -99,6 +105,16 @@
               <UButton icon="i-lucide-save" label="Save" color="primary" size="xs" :loading="saving" :disabled="rawMode && !!rawJsonError" @click="saveConfig" />
             </template>
 
+            <template v-if="activeTab === 'prompt'">
+              <transition name="fade">
+                <span v-if="saveMessage" class="text-xs font-medium" :class="saveError ? 'text-(--ui-error)' : 'text-(--ui-success)'">
+                  <UIcon :name="saveError ? 'i-lucide-alert-circle' : 'i-lucide-check-circle'" class="size-3.5 inline-block align-[-3px] mr-1" />
+                  {{ saveMessage }}
+                </span>
+              </transition>
+              <UButton icon="i-lucide-save" label="Save" color="primary" size="xs" :loading="promptEditorRef?.saving" @click="promptEditorRef?.save()" />
+            </template>
+
             <template v-if="activeTab === 'flow'">
               <transition name="fade">
                 <span v-if="saveMessage" class="text-xs font-medium" :class="saveError ? 'text-(--ui-error)' : 'text-(--ui-success)'">
@@ -106,9 +122,16 @@
                   {{ saveMessage }}
                 </span>
               </transition>
-              <UButton icon="i-lucide-sparkles" label="Generate" color="neutral" variant="soft" size="xs" :loading="generatingFlow" @click="generateFlow" />
-              <UButton v-if="editConfig.flow" :icon="flowEditMode ? 'i-lucide-eye' : 'i-lucide-pencil'" :label="flowEditMode ? 'Preview' : 'Edit'" color="neutral" variant="ghost" size="xs" @click="flowEditMode = !flowEditMode" />
-              <UButton icon="i-lucide-save" label="Save" color="primary" size="xs" :loading="saving" :disabled="!flowDirty" @click="saveConfig" />
+              <!-- Visual flow builder actions -->
+              <template v-if="selected?.brain === 'flow'">
+                <UButton icon="i-lucide-save" label="Save Flow" color="primary" size="xs" :loading="flowBuilderRef?.saving" @click="flowBuilderRef?.saveFlow()" />
+              </template>
+              <!-- Mermaid flow actions -->
+              <template v-else>
+                <UButton icon="i-lucide-sparkles" label="Generate" color="neutral" variant="soft" size="xs" :loading="generatingFlow" @click="generateFlow" />
+                <UButton v-if="editConfig.flow" :icon="flowEditMode ? 'i-lucide-eye' : 'i-lucide-pencil'" :label="flowEditMode ? 'Preview' : 'Edit'" color="neutral" variant="ghost" size="xs" @click="flowEditMode = !flowEditMode" />
+                <UButton icon="i-lucide-save" label="Save" color="primary" size="xs" :loading="saving" :disabled="!flowDirty" @click="saveConfig" />
+              </template>
             </template>
 
             <!-- Tab switcher -->
@@ -118,7 +141,8 @@
                 v-for="tab in [
                   { id: 'flow', icon: 'i-lucide-git-branch', label: 'Flow' },
                   { id: 'settings', icon: 'i-lucide-sliders-horizontal', label: 'Config' },
-                  { id: 'code', icon: 'i-lucide-code', label: 'Code' },
+                  ...(selected?.brain !== 'flow' ? [{ id: 'prompt', icon: 'i-lucide-layers', label: 'Prompt' }] : []),
+                  ...(selected?.brain !== 'flow' ? [{ id: 'code', icon: 'i-lucide-code', label: 'Code' }] : []),
                 ]"
                 :key="tab.id"
                 class="px-2.5 py-1 text-xs font-medium rounded-md transition-all"
@@ -162,192 +186,113 @@
               </div>
 
               <!-- Form mode -->
-              <div v-else class="space-y-4">
-                <!-- General Info -->
-                <UCard>
-                  <template #header>
-                    <div class="flex items-center gap-2">
-                      <UIcon name="i-lucide-info" class="size-4 text-(--ui-primary)" />
-                      <span class="text-sm font-semibold text-(--ui-text-highlighted)">General Info</span>
-                    </div>
-                  </template>
-                  <div class="flex flex-wrap items-start gap-4">
-                    <UFormField label="Display Name" class="w-56">
-                      <UInput v-model="editConfig.name" placeholder="My Assistant" icon="i-lucide-tag" />
-                    </UFormField>
-                    <UFormField label="Mode" class="w-36">
-                      <USelect
-                        v-model="editConfig.mode"
-                        :items="[{ label: 'Incoming', value: 'incoming' }, { label: 'Outbound', value: 'outbound' }]"
-                      />
-                    </UFormField>
-                    <UFormField label="Language" class="w-32">
-                      <UInput v-model="editConfig.language" placeholder="en-US" icon="i-lucide-languages" />
-                    </UFormField>
-                  </div>
-                  <UFormField label="Description" class="mt-4">
-                    <UTextarea v-model="editConfig.description" placeholder="What this assistant does..." :rows="2" autoresize resize class="w-full" />
-                  </UFormField>
-                </UCard>
-
-                <!-- Voice Prompts -->
-                <UCard v-if="editConfig.prompts">
-                  <template #header>
-                    <div class="flex items-center gap-2">
-                      <UIcon name="i-lucide-message-square-quote" class="size-4 text-(--ui-primary)" />
-                      <span class="text-sm font-semibold text-(--ui-text-highlighted)">Voice Prompts</span>
-                    </div>
-                  </template>
-                  <div class="space-y-1">
-                    <div v-for="(_, key) in editConfig.prompts" :key="key"
-                         class="prompt-row group flex items-center gap-4 px-3 py-2.5 rounded-lg transition-colors">
-                      <span class="text-xs font-mono font-semibold text-(--ui-text-muted) w-28 shrink-0">{{ key }}</span>
-                      <UInput v-model="editConfig.prompts[key]" class="flex-1" placeholder="sound:custom/file_name" variant="none" />
-                      <UIcon name="i-lucide-audio-lines" class="size-4 text-(--ui-text-dimmed) group-hover:text-(--ui-primary) transition-colors pr-1" />
-                    </div>
-                  </div>
-                </UCard>
-
-                <!-- Behavioral Rules -->
-                <UCard v-if="editConfig.behavior">
-                  <template #header>
-                    <div class="flex items-center gap-2">
-                      <UIcon name="i-lucide-activity" class="size-4 text-(--ui-primary)" />
-                      <span class="text-sm font-semibold text-(--ui-text-highlighted)">Behavioral Rules</span>
-                    </div>
-                  </template>
-                  <div class="flex flex-wrap items-start gap-x-6 gap-y-4">
-                    <UFormField v-for="(value, key) in editConfig.behavior" :key="key" :label="behaviorLabel(String(key))" class="w-44">
-                      <UInput
-                        :model-value="editConfig.behavior[key]"
-                        :type="isNumericBehavior(String(key)) ? 'number' : 'text'"
-                        :min="behaviorBounds[String(key)]?.min"
-                        :max="behaviorBounds[String(key)]?.max"
-                        @update:model-value="(v: any) => editConfig.behavior[key] = isNumericBehavior(String(key)) ? Number(v) : v"
-                      />
-                    </UFormField>
-                  </div>
-                </UCard>
-
-                <!-- Transfer & Campaign -->
-                <div class="flex flex-wrap gap-4">
-                  <UCard v-if="editConfig.transfer" class="flex-1 min-w-[16rem]">
-                    <template #header>
-                      <div class="flex items-center gap-2">
-                        <UIcon name="i-lucide-phone-forwarded" class="size-4 text-(--ui-primary)" />
-                        <span class="text-sm font-semibold text-(--ui-text-highlighted)">Transfer Settings</span>
-                      </div>
-                    </template>
-                    <div class="flex flex-wrap items-start gap-4">
-                      <UFormField label="Destination" class="w-48">
-                        <UInput v-model="editConfig.transfer.destination" placeholder="Extension or Number" />
-                      </UFormField>
-                      <UFormField label="Outbound Trunk" class="w-48">
-                        <UInput v-model="editConfig.transfer.trunk" placeholder="PJSIP/trunk-name" />
-                      </UFormField>
-                    </div>
-                  </UCard>
-
-                  <UCard v-if="editConfig.campaign" class="flex-1 min-w-[16rem]">
-                    <template #header>
-                      <div class="flex items-center gap-2">
-                        <UIcon name="i-lucide-pie-chart" class="size-4 text-(--ui-primary)" />
-                        <span class="text-sm font-semibold text-(--ui-text-highlighted)">Campaign Control</span>
-                      </div>
-                    </template>
-                    <div class="flex flex-wrap items-start gap-4">
-                      <UFormField label="Concurrency (1–50)" class="w-36">
-                        <UInput
-                          :model-value="editConfig.campaign.maxConcurrent"
-                          type="number"
-                          :min="1"
-                          :max="50"
-                          @update:model-value="(v: any) => editConfig.campaign.maxConcurrent = Number(v)"
-                        />
-                      </UFormField>
-                      <UFormField label="Default Trunk" class="w-48">
-                        <UInput v-model="editConfig.campaign.trunk" placeholder="PJSIP/out-trunk" />
-                      </UFormField>
-                    </div>
-                  </UCard>
-                </div>
-              </div>
+              <AssistantConfigForm
+                v-else
+                v-model="editConfig"
+                :brain="editConfig.brain || null"
+                :slug="selected?.slug || ''"
+                :available-brains="availableBrains"
+              />
             </div>
           </div>
 
           <!-- Flow Tab -->
           <div v-if="activeTab === 'flow'" class="flex-1 flex flex-col min-h-0">
-            <div class="flex-1 min-h-0 flex gap-4">
-              <!-- Mermaid preview -->
-              <div class="flex-1 min-w-0 rounded-xl border border-(--ui-border) bg-(--ui-bg) overflow-auto p-6">
-                <template v-if="editConfig.flow">
-                  <ChatMermaidBlock :code="editConfig.flow" />
-                </template>
-                <div v-else class="h-full flex items-center justify-center">
-                  <div class="text-center">
-                    <UIcon name="i-lucide-workflow" class="size-12 text-(--ui-text-dimmed) mx-auto mb-3" />
-                    <p class="text-sm text-(--ui-text-muted) mb-1">No flow diagram defined yet</p>
-                    <p class="text-xs text-(--ui-text-dimmed) mb-4">Add a Mermaid flowchart to visualize this assistant's call logic</p>
-                    <UButton
-                      label="Add Flow Diagram"
-                      icon="i-lucide-plus"
-                      color="primary"
-                      variant="soft"
-                      size="sm"
-                      @click="editConfig.flow = 'flowchart TD\n    A([Start]) --> B[Step 1]\n    B --> C{Decision}\n    C -->|Yes| D([End])\n    C -->|No| B'; flowEditMode = true"
-                    />
+            <!-- Visual Flow Builder for flow brains -->
+            <template v-if="selected?.brain === 'flow'">
+              <AssistantFlowBuilder ref="flowBuilderRef" :slug="selected.slug" />
+            </template>
+
+            <!-- Mermaid preview for other brains -->
+            <template v-else>
+              <div class="flex-1 min-h-0 flex gap-4">
+                <div class="flex-1 min-w-0 rounded-xl border border-(--ui-border) bg-(--ui-bg) overflow-auto p-6">
+                  <template v-if="editConfig.flow">
+                    <ChatMermaidBlock :code="editConfig.flow" />
+                  </template>
+                  <div v-else class="h-full flex items-center justify-center">
+                    <div class="text-center">
+                      <UIcon name="i-lucide-workflow" class="size-12 text-(--ui-text-dimmed) mx-auto mb-3" />
+                      <p class="text-sm text-(--ui-text-muted) mb-1">No flow diagram defined yet</p>
+                      <p class="text-xs text-(--ui-text-dimmed) mb-4">Add a Mermaid flowchart to visualize this assistant's call logic</p>
+                      <UButton
+                        label="Add Flow Diagram"
+                        icon="i-lucide-plus"
+                        color="primary"
+                        variant="soft"
+                        size="sm"
+                        @click="editConfig.flow = 'flowchart TD\n    A([Start]) --> B[Step 1]\n    B --> C{Decision}\n    C -->|Yes| D([End])\n    C -->|No| B'; flowEditMode = true"
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <!-- Source editor (collapsible) -->
-              <div v-if="flowEditMode && editConfig.flow" class="w-[400px] shrink-0 flex flex-col rounded-xl border border-(--ui-border) overflow-hidden">
-                <div class="flex items-center gap-2 px-3 py-2 bg-(--ui-bg-elevated) border-b border-(--ui-border)">
-                  <UIcon name="i-lucide-file-code" class="size-3.5 text-(--ui-text-dimmed)" />
-                  <span class="text-xs font-semibold text-(--ui-text-dimmed) uppercase tracking-wider">Mermaid Source</span>
+                <div v-if="flowEditMode && editConfig.flow" class="w-[400px] shrink-0 flex flex-col rounded-xl border border-(--ui-border) overflow-hidden">
+                  <div class="flex items-center gap-2 px-3 py-2 bg-(--ui-bg-elevated) border-b border-(--ui-border)">
+                    <UIcon name="i-lucide-file-code" class="size-3.5 text-(--ui-text-dimmed)" />
+                    <span class="text-xs font-semibold text-(--ui-text-dimmed) uppercase tracking-wider">Mermaid Source</span>
+                  </div>
+                  <textarea
+                    v-model="editConfig.flow"
+                    class="flex-1 font-mono text-sm p-4 bg-(--ui-bg) text-(--ui-text) resize-none focus:outline-none"
+                    spellcheck="false"
+                    placeholder="flowchart TD&#10;    A([Start]) --> B[Step]"
+                  />
                 </div>
-                <textarea
-                  v-model="editConfig.flow"
-                  class="flex-1 font-mono text-sm p-4 bg-(--ui-bg) text-(--ui-text) resize-none focus:outline-none"
-                  spellcheck="false"
-                  placeholder="flowchart TD&#10;    A([Start]) --> B[Step]"
-                />
               </div>
-            </div>
+            </template>
+          </div>
+
+          <!-- Prompt Tab -->
+          <div v-if="activeTab === 'prompt'" class="flex-1 overflow-y-auto">
+            <AssistantPromptEditor ref="promptEditorRef" :slug="selected.slug" />
           </div>
 
           <!-- Code Tab -->
-          <div v-if="activeTab === 'code'" class="flex-1 flex min-h-0 rounded-xl border border-(--ui-border) overflow-hidden">
-            <div class="flex-1 min-w-0 h-full">
-              <AssistantCodeEditor ref="codeEditorRef" :slug="selected.slug" />
+          <div v-if="activeTab === 'code'" class="flex-1 flex flex-col min-h-0 rounded-xl border border-(--ui-border) overflow-hidden">
+            <!-- Preset banner -->
+            <div v-if="selectedIsPreset" class="flex items-center gap-2 px-3 py-2 bg-(--ui-bg-elevated) border-b border-(--ui-border) shrink-0">
+              <UIcon name="i-lucide-puzzle" class="size-4 text-(--ui-info)" />
+              <span class="text-xs text-(--ui-text-muted)">
+                This assistant uses the <strong class="text-(--ui-text-highlighted)">{{ selected.brain }}</strong> preset. Code is read-only.
+              </span>
+              <UBadge label="PRESET" color="info" variant="subtle" size="xs" />
             </div>
 
-            <button
-              class="w-7 shrink-0 flex items-center justify-center border-l border-(--ui-border) bg-(--ui-bg-elevated) hover:bg-(--ui-bg-elevated)/80 transition-colors"
-              @click="chatOpen = !chatOpen"
-            >
-              <UIcon
-                :name="chatOpen ? 'i-lucide-panel-right-close' : 'i-lucide-sparkles'"
-                class="size-4"
-                :class="chatOpen ? 'text-(--ui-text-muted)' : 'text-(--ui-primary)'"
-              />
-            </button>
-
-            <template v-if="chatOpen">
-              <div
-                class="w-1 shrink-0 cursor-col-resize bg-(--ui-border) hover:bg-(--ui-primary)/40 active:bg-(--ui-primary)/60 transition-colors"
-                @mousedown="startResize"
-              />
-              <div class="shrink-0 h-full overflow-hidden" :style="{ width: chatWidth + 'px' }">
-                <AssistantCodeChat
-                  :code-getter="() => codeEditorRef?.getCode?.() || ''"
-                  :file-name-getter="() => codeEditorRef?.getFileName?.() || ''"
-                  :slug="selected.slug"
-                  @apply-code="applyCodeFromChat"
-                  @apply-code-direct="applyCodeDirectFromChat"
-                />
+            <div class="flex-1 flex min-h-0">
+              <div class="flex-1 min-w-0 h-full">
+                <AssistantCodeEditor ref="codeEditorRef" :slug="selected.slug" :read-only="selectedIsPreset" />
               </div>
-            </template>
+
+              <template v-if="!selectedIsPreset">
+                <button
+                  class="w-7 shrink-0 flex items-center justify-center border-l border-(--ui-border) bg-(--ui-bg-elevated) hover:bg-(--ui-bg-elevated)/80 transition-colors"
+                  @click="chatOpen = !chatOpen"
+                >
+                  <UIcon
+                    :name="chatOpen ? 'i-lucide-panel-right-close' : 'i-lucide-sparkles'"
+                    class="size-4"
+                    :class="chatOpen ? 'text-(--ui-text-muted)' : 'text-(--ui-primary)'"
+                  />
+                </button>
+
+                <template v-if="chatOpen">
+                  <div
+                    class="w-1 shrink-0 cursor-col-resize bg-(--ui-border) hover:bg-(--ui-primary)/40 active:bg-(--ui-primary)/60 transition-colors"
+                    @mousedown="startResize"
+                  />
+                  <div class="shrink-0 h-full overflow-hidden" :style="{ width: chatWidth + 'px' }">
+                    <AssistantCodeChat
+                      :code-getter="() => codeEditorRef?.getCode?.() || ''"
+                      :file-name-getter="() => codeEditorRef?.getFileName?.() || ''"
+                      :slug="selected.slug"
+                      @apply-code="applyCodeFromChat"
+                      @apply-code-direct="applyCodeDirectFromChat"
+                    />
+                  </div>
+                </template>
+              </template>
+            </div>
           </div>
         </template>
       </div>
@@ -412,10 +357,13 @@
 interface AssistantEntry {
   slug: string;
   config: any;
+  hasCode: boolean;
+  brain: string | null;
   error?: string;
 }
 
 const assistants = ref<AssistantEntry[]>([]);
+const availableBrains = ref<{ slug: string; file: string }[]>([]);
 const selected = ref<AssistantEntry | null>(null);
 const selectedDir = ref("");
 const editConfig = ref<any>({});
@@ -424,7 +372,7 @@ const rawMode = ref(false);
 const saving = ref(false);
 const saveMessage = ref("");
 const saveError = ref(false);
-const activeTab = ref<"settings" | "flow" | "code">("flow");
+const activeTab = ref<"settings" | "flow" | "prompt" | "code">("flow");
 const showCreate = ref(false);
 const showDeleteConfirm = ref(false);
 const deleting = ref(false);
@@ -433,11 +381,15 @@ const chatOpen = ref(true);
 const chatWidth = ref(450);
 
 const codeEditorRef = ref<any>(null);
+const promptEditorRef = ref<any>(null);
+const flowBuilderRef = ref<any>(null);
 const flowEditMode = ref(false);
 const flowOriginal = ref("");
 const generatingFlow = ref(false);
 const builtInSlugs = ["ivr-transfer", "direct-dial", "auto-dialer-call"];
 const rawJsonError = ref("");
+
+const selectedIsPreset = computed(() => !!selected.value?.brain);
 
 const flowDirty = computed(() => {
   return (editConfig.value.flow || "") !== flowOriginal.value;
@@ -468,8 +420,9 @@ async function generateFlow() {
 
 async function fetchAssistants() {
   try {
-    const data = await $fetch<{ assistants: AssistantEntry[] }>("/api/assistants");
+    const data = await $fetch<{ assistants: AssistantEntry[]; brains: { slug: string; file: string }[] }>("/api/assistants");
     assistants.value = data.assistants || [];
+    availableBrains.value = data.brains || [];
   } catch (e) {
     console.error("Failed to fetch assistants:", e);
   }
@@ -478,8 +431,8 @@ async function fetchAssistants() {
 async function selectAssistant(slug: string) {
   saveMessage.value = "";
   try {
-    const data = await $fetch<{ slug: string; config: any; raw: string; dir: string }>(`/api/assistants/${slug}`);
-    selected.value = { slug, config: data.config };
+    const data = await $fetch<{ slug: string; config: any; raw: string; dir: string; hasCode: boolean; brain: string | null }>(`/api/assistants/${slug}`);
+    selected.value = { slug, config: data.config, hasCode: data.hasCode, brain: data.brain };
     selectedDir.value = data.dir || "";
     editConfig.value = JSON.parse(JSON.stringify(data.config));
     rawJson.value = JSON.stringify(data.config, null, 2);
@@ -529,7 +482,8 @@ async function saveConfig() {
     editConfig.value = JSON.parse(JSON.stringify(data.config));
     rawJson.value = JSON.stringify(data.config, null, 2);
     flowOriginal.value = data.config.flow || "";
-    selected.value = { slug: selected.value.slug, config: data.config };
+    const brain = data.config.brain || null;
+    selected.value = { slug: selected.value.slug, config: data.config, hasCode: !brain && selected.value.hasCode, brain };
     saveMessage.value = "Saved successfully";
     await fetchAssistants();
   } catch (e: any) {
@@ -583,7 +537,7 @@ async function onAssistantCreated(slug: string) {
 }
 
 function applyCodeFromChat(code: string) {
-  if (!code) return;
+  if (!code || selected.value?.brain === 'flow') return;
   activeTab.value = "code";
   nextTick(() => {
     if (codeEditorRef.value?.showDiff) {
@@ -593,7 +547,7 @@ function applyCodeFromChat(code: string) {
 }
 
 function applyCodeDirectFromChat(code: string) {
-  if (!code) return;
+  if (!code || selected.value?.brain === 'flow') return;
   activeTab.value = "code";
   nextTick(() => {
     if (codeEditorRef.value?.applyDirectly) {
@@ -609,34 +563,6 @@ async function copyPath(slug: string) {
   await navigator.clipboard.writeText(path);
   pathCopied.value = true;
   setTimeout(() => { pathCopied.value = false; }, 2000);
-}
-
-// Behavior field type enforcement
-const behaviorBounds: Record<string, { min: number; max: number }> = {
-  maxRetries: { min: 0, max: 100 },
-  timeoutSeconds: { min: 1, max: 300 },
-  silenceThresholdSeconds: { min: 1, max: 60 },
-  maxNoMatches: { min: 1, max: 100 },
-  tryAgainInterval: { min: 1, max: 50 },
-};
-
-const behaviorLabels: Record<string, string> = {
-  maxRetries: "Max Retries",
-  timeoutSeconds: "Timeout (s)",
-  silenceThresholdSeconds: "Silence Threshold (s)",
-  maxNoMatches: "Max No-Matches",
-  tryAgainInterval: "Try Again Interval",
-  transferDigit: "Transfer Digit",
-};
-
-function isNumericBehavior(key: string): boolean {
-  return key in behaviorBounds;
-}
-
-function behaviorLabel(key: string): string {
-  const label = behaviorLabels[key] || key;
-  const bounds = behaviorBounds[key];
-  return bounds ? `${label} (${bounds.min}–${bounds.max})` : label;
 }
 
 function assistantIcon(slug: string): string {
@@ -719,15 +645,6 @@ onMounted(() => {
   background-color: var(--ui-bg-elevated);
   color: var(--ui-text-highlighted);
   box-shadow: 0 1px 2px rgba(0,0,0,.06);
-}
-
-/* Prompt row hover */
-.prompt-row {
-  border: 1px solid transparent;
-}
-.prompt-row:hover {
-  background-color: var(--ui-bg-elevated);
-  border-color: var(--ui-border);
 }
 
 /* Transitions */

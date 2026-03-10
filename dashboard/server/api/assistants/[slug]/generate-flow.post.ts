@@ -9,7 +9,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const slug = getRouterParam(event, "slug");
-  if (!slug || slug === "base" || slug.includes("..")) {
+  if (!slug || slug === "base" || !/^[a-z0-9][a-z0-9_-]{0,63}$/i.test(slug)) {
     throw createError({ statusCode: 400, message: "Invalid slug" });
   }
 
@@ -36,6 +36,23 @@ export default defineEventHandler(async (event) => {
     configJson = readFileSync(configFile, "utf-8");
   }
 
+  // Fallback: if no assistant code, try brain code for preset-based assistants
+  if (!code && configJson) {
+    try {
+      const parsed = JSON.parse(configJson);
+      if (parsed.brain) {
+        const brainFile = parsed.brain
+          .split("-")
+          .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join("") + "Brain.ts";
+        const brainPath = resolve(rootDir, "assistants", "brains", brainFile);
+        if (existsSync(brainPath)) {
+          code = readFileSync(brainPath, "utf-8");
+        }
+      }
+    } catch { /* ignore parse errors */ }
+  }
+
   if (!code) {
     throw createError({ statusCode: 400, message: "No assistant code found" });
   }
@@ -44,7 +61,7 @@ export default defineEventHandler(async (event) => {
 
   const result = await generateText({
     model: mistral("mistral-small-latest"),
-    maxTokens: 1024,
+    maxOutputTokens: 1024,
     temperature: 0.2,
     prompt: `Analyze this Asterisk ARI assistant code and generate a Mermaid flowchart diagram showing its call flow.
 

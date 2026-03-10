@@ -7,7 +7,7 @@
         <button class="cyber-sidebar-toggle" @click="collapsed = !collapsed">
           <UIcon :name="collapsed ? 'i-lucide-panel-left-open' : 'i-lucide-panel-left-close'" class="size-4" />
         </button>
-        <NuxtLink to="/dashboardv2" class="cyber-sidebar-home">
+        <NuxtLink to="/" class="cyber-sidebar-home">
           <div class="cyber-sidebar-logo">
             <UIcon name="i-lucide-radio" class="size-5" />
           </div>
@@ -64,7 +64,7 @@
     <Transition name="slide-in">
       <aside v-if="mobileOpen" class="cyber-sidebar cyber-sidebar--mobile">
         <div class="cyber-sidebar-header">
-          <NuxtLink to="/dashboardv2" class="cyber-sidebar-home" @click="mobileOpen = false">
+          <NuxtLink to="/" class="cyber-sidebar-home" @click="mobileOpen = false">
             <div class="cyber-sidebar-logo">
               <UIcon name="i-lucide-radio" class="size-5" />
             </div>
@@ -124,7 +124,7 @@ function isActive(to: string): boolean {
 
 const navItems = [
   { label: "DASHBOARD", icon: "i-lucide-layout-dashboard", to: "/" },
-  { label: "DASHBOARD V2", icon: "i-lucide-monitor", to: "/dashboardv2" },
+
   { label: "CALLS", icon: "i-lucide-phone", to: "/calls" },
   { label: "ASSETS", icon: "i-lucide-folder-open", to: "/assets" },
   { label: "TERMINAL", icon: "i-lucide-terminal", to: "/terminal" },

@@ -21,6 +21,57 @@
 import type { AssistantConfig, AssistantState } from "./AssistantTypes";
 
 /**
+ * Context passed to module-type tool execute() functions.
+ * Gives access to call context and config without exposing the full harness.
+ * For call control (transfer/hangup), return "__transfer__:ext" or "__hangup__".
+ */
+export interface ToolContext {
+  callerId: string;
+  sessionId: string;
+  config: any;
+  env: NodeJS.ProcessEnv;
+}
+
+/** Handler for a declarative tool (defined in tools.json) */
+export type ToolHandler =
+  | { type: "http"; method?: string; url: string; query?: Record<string, string>; headers?: Record<string, string>; body?: Record<string, any>; timeout?: number }
+  | { type: "webhook"; url: string; headers?: Record<string, string>; timeout?: number }
+  | { type: "transfer"; extension: string }
+  | { type: "hangup" }
+  | { type: "shell"; command: string; timeout?: number }
+  | { type: "module"; file: string }
+  | { type: "mcp"; serverUrl: string; toolName: string; timeout?: number };
+
+/**
+ * A callable tool exposed to the LLM via function calling.
+ * Defined in tools.json or auto-discovered from tools/*.ts module exports.
+ */
+export interface AgentTool {
+  name: string;
+  description: string;
+  parameters: Record<string, any>; // JSON Schema object
+  handler: ToolHandler;
+  /** Absolute path to the assistant dir — set by AssistantFactory, not by user */
+  _assistantDir?: string;
+}
+
+/**
+ * Prompt layers loaded from .md files in the assistant directory.
+ * Used by LLM-based brains to compose a "Safety Sandwich" prompt:
+ *   [guardrails] → [system prompt] → [knowledge] → [guardrails]
+ */
+export interface PromptLayers {
+  /** Contents of system-prompt.md (null if file doesn't exist) */
+  systemPrompt: string | null;
+  /** Contents of guardrails.md (null if file doesn't exist) */
+  guardrails: string | null;
+  /** Contents of knowledge/*.md files */
+  knowledge: { name: string; content: string }[];
+  /** Tools loaded from tools.json + tools/*.ts */
+  tools: AgentTool[];
+}
+
+/**
  * The harness interface exposed to brains.
  * Brains call these methods to interact with the telephony layer.
  */
@@ -51,6 +102,7 @@ export interface IBrainHarness {
   // Context
   readonly sessionId: string;
   readonly config: AssistantConfig;
+  readonly layers: PromptLayers;
 
   // Data access
   getContacts(): any;

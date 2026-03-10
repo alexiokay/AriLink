@@ -182,6 +182,65 @@ The env API only accepts updates to keys defined in `ENV_SCHEMA` (see `server/ut
 
 ---
 
+---
+
+## Agent Tool Security
+
+### SSRF Protection
+
+`http` and `webhook` tool handlers block requests to private/internal IP ranges before any network call is made.
+
+**Blocked ranges:**
+- `127.0.0.0/8` — loopback
+- `10.0.0.0/8` — private
+- `172.16.0.0/12` — private
+- `192.168.0.0/16` — private
+- `169.254.0.0/16` — link-local / AWS metadata endpoint
+- `100.64.0.0/10` — CGNAT shared address space
+- `fc00::/7`, `fe80::/10` — IPv6 ULA / link-local
+- `localhost`, `0.0.0.0`, `::1`
+
+**Bypass for local development only:**
+```env
+ALLOW_PRIVATE_TOOL_URLS=true
+```
+
+### Shell Injection Prevention
+
+The `shell` handler uses `interpolateShell()` — all LLM-supplied argument values are POSIX single-quoted before substitution:
+
+```
+{{phone}} = "+48;rm -rf /" → '+48;rm -rf /'  (safe literal, shell metacharacters inert)
+```
+
+### Module Tool Path Containment
+
+The `module` handler (`tools/*.ts`) enforces:
+1. Relative paths only — absolute paths are rejected
+2. Path must resolve within `assistants/<slug>/` — `../../` traversal is blocked
+
+### Slug Validation
+
+All API routes validate the assistant slug against a strict allowlist regex:
+```
+/^[a-z0-9][a-z0-9_-]{0,63}$/i
+```
+This blocks path traversal (`..`), directory separators (`/`, `\`), and special characters in a single check.
+
+### MCP Server URL Validation
+
+MCP server URLs configured via the dashboard must use `http:` or `https:` schemes. `file://`, `ftp://`, and other schemes are rejected.
+
+### Prompt Injection (Spotlighting)
+
+Tool results from external sources are wrapped in `<tool_result name="...">` tags before being injected into the LLM conversation history. The system prompt explicitly instructs the LLM to treat content within these tags as raw data, not instructions.
+
+This is the Microsoft/Anthropic recommended mitigation for indirect prompt injection (OWASP LLM01:2025).
+
+> **Note:** Complete defense against prompt injection is not possible with current LLM architectures. Spotlighting reduces the attack surface probabilistically. See [AI Safety Guardrails](AI-SAFETY-GUARDRAILS.md) for deeper analysis.
+
+---
+
 ## Checklist
 
 - [ ] Set `DASHBOARD_SECRET` in `.env` for production
@@ -192,3 +251,5 @@ The env API only accepts updates to keys defined in `ENV_SCHEMA` (see `server/ut
 - [ ] Set up `fail2ban` on the VPS for SSH and SIP brute-force protection
 - [ ] Configure firewall — only allow necessary ports (SIP, RTP range)
 - [ ] Regularly update OS packages and Docker images
+- [ ] Do NOT set `ALLOW_PRIVATE_TOOL_URLS=true` in production
+- [ ] Review `tools.json` for any shell commands — ensure no user-controlled data flows into command structure outside of `{{}}` placeholders
